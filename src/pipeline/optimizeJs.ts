@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { minify } from 'terser';
+import { hashContent } from '../utils/crypto.js';
 
 // Known dead scripts that serve no purpose on static sites
 const DEAD_SCRIPT_PATTERNS = [
@@ -15,13 +16,13 @@ export interface JsOptimizeResult {
   originalBytes: number;
   optimizedBytes: number;
   removed: boolean;
+  newPath?: string;
 }
 
 /**
- * Optimize a JavaScript file with Terser minification.
- * Returns removed=true if the script was identified as dead code.
+ * Optimize a JavaScript file with Terser minification + content-hash rename.
  */
-export async function optimizeJs(
+export async function optimizeJsFile(
   jsRelativePath: string,
   workDir: string
 ): Promise<JsOptimizeResult> {
@@ -40,8 +41,8 @@ export async function optimizeJs(
   // Check if this is a known dead script
   const isDead = DEAD_SCRIPT_PATTERNS.some(pattern => filename.includes(pattern));
   if (isDead) {
-    // Remove the file entirely
     await fs.unlink(jsPath).catch(() => {});
+    console.log(`[js] Removed dead script: ${jsRelativePath}`);
     return { originalBytes, optimizedBytes: 0, removed: true };
   }
 
@@ -62,11 +63,26 @@ export async function optimizeJs(
 
     if (result.code) {
       const optimizedBytes = Buffer.byteLength(result.code, 'utf-8');
-      await fs.writeFile(jsPath, result.code, 'utf-8');
-      return { originalBytes, optimizedBytes, removed: false };
+
+      // Content-hash the filename
+      const hash = hashContent(result.code).slice(0, 8);
+      const ext = path.extname(jsPath);
+      const basename = path.basename(jsPath, ext);
+      const hashedFilename = `${basename}.${hash}${ext}`;
+      const hashedPath = path.join(path.dirname(jsPath), hashedFilename);
+
+      await fs.writeFile(hashedPath, result.code, 'utf-8');
+      if (hashedPath !== jsPath) {
+        await fs.unlink(jsPath).catch(() => {});
+      }
+
+      const hashedRelativePath = jsRelativePath.replace(path.basename(jsRelativePath), hashedFilename);
+      console.log(`[js] ${jsRelativePath}: ${originalBytes} → ${optimizedBytes} bytes (${Math.round((1 - optimizedBytes / originalBytes) * 100)}% reduction) → ${hashedFilename}`);
+
+      return { originalBytes, optimizedBytes, removed: false, newPath: hashedRelativePath };
     }
   } catch (err) {
-    console.warn(`Terser minification failed for ${jsRelativePath}:`, (err as Error).message);
+    console.warn(`[js] Terser minification failed for ${jsRelativePath}:`, (err as Error).message);
   }
 
   return { originalBytes, optimizedBytes: originalBytes, removed: false };
@@ -80,27 +96,72 @@ export function usesDocumentWrite(jsContent: string): boolean {
 }
 
 /**
- * Add defer attribute to script tags in <head> that don't already have defer or async.
- * Skip scripts that use document.write (they break with defer).
+ * Add defer attribute to ALL <script src> tags in the entire document
+ * that don't already have defer or async.
+ * Skip scripts that use document.write.
  */
 export function addDeferToScripts(html: string): string {
-  // Match script tags in <head> that have a src but no defer/async
   return html.replace(
-    /(<head[\s\S]*?<\/head>)/i,
-    (headBlock) => {
-      return headBlock.replace(
-        /<script\s([^>]*?)src="([^"]*?)"([^>]*?)>([\s\S]*?)<\/script>/gi,
-        (match, before, src, after, content) => {
-          // Skip if already has defer or async
-          const attrs = before + after;
-          if (/\b(defer|async)\b/i.test(attrs)) return match;
+    /<script\s([^>]*?)src=["']([^"']*?)["']([^>]*?)>([\s\S]*?)<\/script>/gi,
+    (match, before, src, after, content) => {
+      const attrs = before + after;
+      // Skip if already has defer or async
+      if (/\b(defer|async)\b/i.test(attrs)) return match;
+      // Skip if inline content uses document.write
+      if (content && usesDocumentWrite(content)) return match;
 
-          // Skip if inline content uses document.write
-          if (content && usesDocumentWrite(content)) return match;
-
-          return `<script ${before}src="${src}"${after} defer>${content}</script>`;
-        }
-      );
+      return `<script ${before}src="${src}"${after} defer>${content}</script>`;
     }
   );
+}
+
+/**
+ * Move inline <script> blocks from <head> to end of <body>.
+ * Keeps scripts that set critical CSS variables or are tiny config objects.
+ */
+export function moveHeadScriptsToBody(html: string): string {
+  const headMatch = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+  if (!headMatch) return html;
+
+  const headContent = headMatch[1];
+  const scriptsToMove: string[] = [];
+
+  // Find inline scripts in head (no src attribute)
+  const updatedHead = headContent.replace(
+    /<script(?!\s[^>]*src=)([^>]*)>([\s\S]*?)<\/script>/gi,
+    (match, attrs, content) => {
+      // Keep tiny config scripts (< 200 chars) and JSON-LD in head
+      if (content.length < 200 || /application\/ld\+json/i.test(attrs)) {
+        return match;
+      }
+      // Keep scripts that define CSS custom properties
+      if (/--[\w-]+\s*:/i.test(content)) {
+        return match;
+      }
+      scriptsToMove.push(match);
+      return ''; // Remove from head
+    }
+  );
+
+  if (scriptsToMove.length === 0) return html;
+
+  // Replace head
+  html = html.replace(headMatch[0], `<head>${updatedHead}</head>`);
+
+  // Append scripts before </body>
+  const scriptsBlock = scriptsToMove.join('\n');
+  html = html.replace('</body>', `${scriptsBlock}\n</body>`);
+
+  console.log(`[js] Moved ${scriptsToMove.length} inline scripts from <head> to end of <body>`);
+  return html;
+}
+
+/**
+ * Update all JS references in HTML to use content-hashed filenames.
+ */
+export function updateJsReferences(html: string, renames: Map<string, string>): string {
+  for (const [oldPath, newPath] of renames) {
+    html = html.split(oldPath).join(newPath);
+  }
+  return html;
 }

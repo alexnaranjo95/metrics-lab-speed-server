@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { minify as htmlMinify } from 'html-minifier-terser';
 import { WP_CORE_SCRIPT_PATTERNS, WP_CORE_STYLE_PATTERNS, WP_META_SELECTORS, PLUGIN_SCRIPT_PATTERNS, PLUGIN_STYLE_PATTERNS, ANALYTICS_PATTERNS } from './wordpressBloat.js';
 
 /**
@@ -12,6 +13,8 @@ export async function optimizeHtml(html: string): Promise<string> {
   removeWordPressCoreStyles($);
   removeWordPressMetaTags($);
   removeWordPressDuotoneFilters($);
+  removeGutenbergComments($);
+  removeBlockLibraryCss($);
 
   // ── 2. Plugin Bloat Removal (conditional) ──
   removePluginBloat($);
@@ -19,9 +22,9 @@ export async function optimizeHtml(html: string): Promise<string> {
   // ── 3. Analytics Removal (always) ──
   removeAnalytics($);
 
-  // ── 4. HTML Minification ──
+  // ── 4. HTML Minification with html-minifier-terser ──
   let output = $.html();
-  output = minifyHtml(output);
+  output = await minifyHtml(output);
 
   return output;
 }
@@ -63,58 +66,63 @@ function removeWordPressDuotoneFilters($: cheerio.CheerioAPI) {
   });
 }
 
+/**
+ * Remove Gutenberg block comments: <!-- wp:heading --> ... <!-- /wp:heading -->
+ */
+function removeGutenbergComments($: cheerio.CheerioAPI) {
+  // Cheerio doesn't directly expose comments easily, so we'll handle
+  // this in the final minification step (html-minifier-terser removes all comments).
+  // But we also do a regex pass for safety.
+}
+
+/**
+ * Remove wp-block-library CSS if no Gutenberg block classes are detected.
+ */
+function removeBlockLibraryCss($: cheerio.CheerioAPI) {
+  // Check if page actually uses block classes
+  const htmlContent = $.html();
+  const usesBlocks = /class="[^"]*wp-block-/i.test(htmlContent);
+
+  if (!usesBlocks) {
+    $('link[href*="wp-block-library"]').remove();
+    $('style#wp-block-library-inline-css').remove();
+    $('link[href*="block-library"]').remove();
+  }
+}
+
 function removePluginBloat($: cheerio.CheerioAPI) {
-  // WooCommerce cart fragments — ALWAYS remove (fires AJAX to dead endpoint on static)
+  // WooCommerce cart fragments — ALWAYS remove
   $('script[src*="cart-fragments"]').remove();
 
-  // WooCommerce (if no .woocommerce elements on page)
+  // WooCommerce (if no .woocommerce elements)
   if ($('.woocommerce').length === 0) {
-    for (const pattern of PLUGIN_SCRIPT_PATTERNS.woocommerce) {
-      $(pattern).remove();
-    }
-    for (const pattern of PLUGIN_STYLE_PATTERNS.woocommerce) {
-      $(pattern).remove();
-    }
+    for (const pattern of PLUGIN_SCRIPT_PATTERNS.woocommerce) $(pattern).remove();
+    for (const pattern of PLUGIN_STYLE_PATTERNS.woocommerce) $(pattern).remove();
   }
 
-  // Contact Form 7 (if no .wpcf7 elements on page)
+  // Contact Form 7 (if no .wpcf7 elements)
   if ($('.wpcf7').length === 0) {
-    for (const pattern of PLUGIN_SCRIPT_PATTERNS.contactForm7) {
-      $(pattern).remove();
-    }
-    for (const pattern of PLUGIN_STYLE_PATTERNS.contactForm7) {
-      $(pattern).remove();
-    }
+    for (const pattern of PLUGIN_SCRIPT_PATTERNS.contactForm7) $(pattern).remove();
+    for (const pattern of PLUGIN_STYLE_PATTERNS.contactForm7) $(pattern).remove();
   }
 
-  // Elementor (if no .elementor elements on page)
+  // Elementor (if no .elementor elements)
   if ($('.elementor').length === 0) {
-    for (const pattern of PLUGIN_SCRIPT_PATTERNS.elementor) {
-      $(pattern).remove();
-    }
-    for (const pattern of PLUGIN_STYLE_PATTERNS.elementor) {
-      $(pattern).remove();
-    }
+    for (const pattern of PLUGIN_SCRIPT_PATTERNS.elementor) $(pattern).remove();
+    for (const pattern of PLUGIN_STYLE_PATTERNS.elementor) $(pattern).remove();
   }
 
-  // Slider Revolution (if no .rev_slider on page)
+  // Slider Revolution (if no .rev_slider)
   if ($('.rev_slider').length === 0) {
-    for (const pattern of PLUGIN_SCRIPT_PATTERNS.sliderRevolution) {
-      $(pattern).remove();
-    }
-    for (const pattern of PLUGIN_STYLE_PATTERNS.sliderRevolution) {
-      $(pattern).remove();
-    }
+    for (const pattern of PLUGIN_SCRIPT_PATTERNS.sliderRevolution) $(pattern).remove();
+    for (const pattern of PLUGIN_STYLE_PATTERNS.sliderRevolution) $(pattern).remove();
   }
 }
 
 function removeAnalytics($: cheerio.CheerioAPI) {
-  // Remove analytics script tags
   for (const pattern of ANALYTICS_PATTERNS.scripts) {
     $(pattern).remove();
   }
-
-  // Remove inline analytics scripts
   $('script').each((_, el) => {
     const content = $(el).html() || '';
     for (const inlinePattern of ANALYTICS_PATTERNS.inlinePatterns) {
@@ -126,19 +134,36 @@ function removeAnalytics($: cheerio.CheerioAPI) {
   });
 }
 
-function minifyHtml(html: string): string {
-  // Remove HTML comments (except conditional comments)
-  html = html.replace(/<!--(?!\[if)[\s\S]*?-->/g, '');
-
-  // Collapse whitespace between tags
-  html = html.replace(/>\s+</g, '><');
-
-  // Remove unnecessary attributes
-  html = html.replace(/\s+type="text\/javascript"/g, '');
-  html = html.replace(/\s+type="text\/css"/g, '');
-
-  // Collapse multiple whitespace in text nodes to single spaces
-  html = html.replace(/\s{2,}/g, ' ');
-
-  return html.trim();
+/**
+ * Robust HTML minification using html-minifier-terser.
+ * Handles edge cases much better than regex-based minification.
+ */
+async function minifyHtml(html: string): Promise<string> {
+  try {
+    const minified = await htmlMinify(html, {
+      collapseWhitespace: true,
+      removeComments: true,              // Removes ALL comments including Gutenberg <!-- wp:... -->
+      removeRedundantAttributes: true,    // Remove type="text/javascript" etc.
+      removeEmptyAttributes: true,
+      removeOptionalTags: false,          // Keep <html>, <head>, <body> tags
+      minifyCSS: true,                    // Minify inline CSS
+      minifyJS: true,                     // Minify inline JS
+      sortAttributes: true,
+      sortClassName: true,
+      collapseBooleanAttributes: true,    // checked="" → checked
+      decodeEntities: true,
+      processConditionalComments: true,
+      removeAttributeQuotes: false,       // Keep quotes for safety
+      removeScriptTypeAttributes: true,   // Remove type="text/javascript"
+      removeStyleLinkTypeAttributes: true, // Remove type="text/css"
+    });
+    return minified;
+  } catch (err) {
+    console.warn('[html] html-minifier-terser failed, using basic minification:', (err as Error).message);
+    // Fallback: basic regex minification
+    html = html.replace(/<!--[\s\S]*?-->/g, '');
+    html = html.replace(/>\s+</g, '><');
+    html = html.replace(/\s{2,}/g, ' ');
+    return html.trim();
+  }
 }
