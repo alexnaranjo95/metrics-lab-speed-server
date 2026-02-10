@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq';
-import { redisConnection } from './connection.js';
+import { redisConnectionOptions } from './connection.js';
 import { config } from '../config.js';
 import { runBuildPipeline } from '../pipeline/index.js';
 import type { BuildJobData } from './buildQueue.js';
@@ -12,7 +12,7 @@ export const buildWorker = new Worker<BuildJobData>(
     await runBuildPipeline(buildId, siteId, scope, pages);
   },
   {
-    connection: redisConnection,
+    connection: redisConnectionOptions,
     concurrency: config.MAX_CONCURRENT_BUILDS,
     limiter: {
       max: 5,

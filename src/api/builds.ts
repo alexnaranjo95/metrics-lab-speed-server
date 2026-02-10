@@ -132,6 +132,42 @@ export async function buildRoutes(app: FastifyInstance) {
     };
   });
 
+  // ── PATCH /api/sites/:siteId/builds/:buildId — Update build (manual cancel/status) ──
+  app.patch('/sites/:siteId/builds/:buildId', async (request, reply) => {
+    const { siteId, buildId } = request.params as { siteId: string; buildId: string };
+    const body = request.body as {
+      status?: string;
+      errorMessage?: string;
+    } | null;
+
+    if (!body || (!body.status && !body.errorMessage)) {
+      return reply.status(400).send({ error: 'Provide at least status or errorMessage' });
+    }
+
+    const build = await db.query.builds.findFirst({
+      where: and(eq(builds.id, buildId), eq(builds.siteId, siteId)),
+    });
+
+    if (!build) {
+      return reply.status(404).send({ error: 'Build not found' });
+    }
+
+    const updates: Record<string, any> = {};
+    if (body.status) updates.status = body.status;
+    if (body.errorMessage) updates.errorMessage = body.errorMessage;
+    if (body.status === 'failed' || body.status === 'success') {
+      updates.completedAt = new Date();
+    }
+
+    await db.update(builds).set(updates).where(eq(builds.id, buildId));
+
+    const updated = await db.query.builds.findFirst({
+      where: eq(builds.id, buildId),
+    });
+
+    return { ...updated };
+  });
+
   // ── GET /api/sites/:siteId/builds — List builds ──
   app.get('/sites/:siteId/builds', async (request, reply) => {
     const { siteId } = request.params as { siteId: string };

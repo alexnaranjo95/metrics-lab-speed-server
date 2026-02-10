@@ -1,16 +1,20 @@
-import Redis from 'ioredis';
 import { config } from '../config.js';
 
-export const redisConnection = new Redis({
+/**
+ * Redis connection OPTIONS (not a shared instance).
+ * BullMQ requires separate connections for Queue and Worker,
+ * so we export config and let BullMQ create its own connections.
+ */
+export const redisConnectionOptions: {
+  host: string;
+  port: number;
+  password?: string;
+  maxRetriesPerRequest: null;
+} = {
   host: config.REDIS_HOST,
   port: config.REDIS_PORT,
+  ...(config.REDIS_PASSWORD ? { password: config.REDIS_PASSWORD } : {}),
   maxRetriesPerRequest: null, // Required by BullMQ
-});
+};
 
-redisConnection.on('error', (err) => {
-  console.error('Redis connection error:', err.message);
-});
-
-redisConnection.on('connect', () => {
-  console.log(`Redis connected at ${config.REDIS_HOST}:${config.REDIS_PORT}`);
-});
+console.log(`Redis config: ${config.REDIS_HOST}:${config.REDIS_PORT} (password: ${config.REDIS_PASSWORD ? 'yes' : 'no'})`);

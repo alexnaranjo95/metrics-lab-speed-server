@@ -1,5 +1,5 @@
 import { Queue } from 'bullmq';
-import { redisConnection } from './connection.js';
+import { redisConnectionOptions } from './connection.js';
 
 export interface BuildJobData {
   buildId: string;
@@ -9,7 +9,7 @@ export interface BuildJobData {
 }
 
 export const buildQueue = new Queue<BuildJobData>('builds', {
-  connection: redisConnection,
+  connection: redisConnectionOptions,
   defaultJobOptions: {
     attempts: 2,
     backoff: { type: 'exponential', delay: 30000 },

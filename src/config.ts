@@ -32,6 +32,7 @@ export const config = {
   // Redis
   REDIS_HOST: optionalEnv('REDIS_HOST', 'localhost') as string,
   REDIS_PORT: intEnv('REDIS_PORT', 6379),
+  REDIS_PASSWORD: optionalEnv('REDIS_PASSWORD'),
 
   // Authentication
   MASTER_API_KEY: requireEnv('MASTER_API_KEY', 'dev_master_key_change_in_production'),
