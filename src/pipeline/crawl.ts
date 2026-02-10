@@ -5,6 +5,10 @@ import { hashContent } from '../utils/crypto.js';
 import { isSameOrigin, urlToPath } from '../utils/url.js';
 import { config } from '../config.js';
 
+// Standard Chrome UA — avoids triggering Cloudflare/LiteSpeed bot detection
+const CHROME_USER_AGENT =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
 export interface CrawlOptions {
   siteUrl: string;
   workDir: string;
@@ -49,7 +53,6 @@ function sanitizeFilename(url: string): string {
     const parsed = new URL(url);
     let filename = parsed.pathname.replace(/^\//, '').replace(/[^a-zA-Z0-9._/-]/g, '_');
     if (!filename || filename === '/') filename = 'index';
-    // Add query hash for cache-busted URLs
     if (parsed.search) {
       const queryHash = hashContent(parsed.search).slice(0, 8);
       const ext = path.extname(filename);
@@ -73,7 +76,7 @@ async function downloadAsset(
 
   try {
     const response = await fetch(url, {
-      headers: { 'User-Agent': 'MetricsLabSpeed/1.0 (build-crawler; +https://metricslab.io)' },
+      headers: { 'User-Agent': CHROME_USER_AGENT },
       signal: AbortSignal.timeout(15000),
     });
 
@@ -95,7 +98,7 @@ async function downloadAsset(
 
     return relativePath;
   } catch (err) {
-    console.warn(`Failed to download asset ${url}:`, (err as Error).message);
+    console.warn(`[crawl] Failed to download asset ${url}:`, (err as Error).message);
     return null;
   }
 }
@@ -113,7 +116,6 @@ async function extractPageData(page: Page, siteUrl: string): Promise<{
     const links: string[] = [];
     const assets: string[] = [];
 
-    // Collect internal links
     document.querySelectorAll('a[href]').forEach((a) => {
       const href = (a as HTMLAnchorElement).href;
       if (href && !href.startsWith('javascript:') && !href.startsWith('mailto:') && !href.startsWith('tel:')) {
@@ -121,22 +123,18 @@ async function extractPageData(page: Page, siteUrl: string): Promise<{
       }
     });
 
-    // Collect script sources
     document.querySelectorAll('script[src]').forEach((s) => {
       assets.push((s as HTMLScriptElement).src);
     });
 
-    // Collect stylesheet links
     document.querySelectorAll('link[rel="stylesheet"][href]').forEach((l) => {
       assets.push((l as HTMLLinkElement).href);
     });
 
-    // Collect images
     document.querySelectorAll('img[src]').forEach((i) => {
       assets.push((i as HTMLImageElement).src);
     });
 
-    // Collect fonts and other linked resources
     document.querySelectorAll('link[href]').forEach((l) => {
       const link = l as HTMLLinkElement;
       if (link.rel === 'preload' || link.rel === 'prefetch') {
@@ -150,11 +148,81 @@ async function extractPageData(page: Page, siteUrl: string): Promise<{
   return { html, title, internalLinks, assetUrls };
 }
 
+/**
+ * Navigate to a URL with retry logic.
+ * Uses domcontentloaded + explicit wait instead of networkidle.
+ * Retries up to `maxRetries` times with increasing delays.
+ */
+async function navigateWithRetry(
+  context: BrowserContext,
+  url: string,
+  options: { timeout: number; maxRetries: number }
+): Promise<{ page: Page; status: number }> {
+  const { timeout, maxRetries } = options;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const page = await context.newPage();
+    try {
+      console.log(`[crawl] Navigating to ${url} (attempt ${attempt}/${maxRetries})`);
+
+      const response = await page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout,
+      });
+
+      const status = response?.status() ?? 0;
+      console.log(`[crawl] Navigation response: status=${status}, url=${url}`);
+
+      // Wait for JS-rendered content to load
+      await page.waitForTimeout(3000);
+
+      // Check for bot protection pages
+      if (status === 403 || status === 503) {
+        const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 200) || '');
+        console.error(`[crawl] Possible bot protection at ${url} (status ${status}): ${bodyText}`);
+
+        if (attempt < maxRetries) {
+          await page.close();
+          const delay = attempt * 3000;
+          console.log(`[crawl] Retrying in ${delay}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+      }
+
+      // Log first 500 chars of HTML to verify real content
+      const htmlPreview = await page.evaluate(() => document.documentElement?.outerHTML?.slice(0, 500) || '');
+      console.log(`[crawl] HTML preview for ${url}: ${htmlPreview}`);
+
+      return { page, status };
+    } catch (err) {
+      console.error(`[crawl] Navigation failed for ${url} (attempt ${attempt}/${maxRetries}):`, (err as Error).message);
+      await page.close();
+
+      if (attempt < maxRetries) {
+        const delay = attempt * 3000;
+        console.log(`[crawl] Retrying in ${delay}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw err; // re-throw on final attempt
+    }
+  }
+
+  throw new Error(`All ${maxRetries} navigation attempts failed for ${url}`);
+}
+
 export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
   const { siteUrl, workDir, scope, existingPages, targetPages } = options;
   const maxPages = config.MAX_PAGES_PER_SITE;
   const concurrency = 3;
   const pageTimeout = 30000;
+
+  console.log(`[crawl] ========== CRAWL START ==========`);
+  console.log(`[crawl] Site URL: ${siteUrl}`);
+  console.log(`[crawl] Scope: ${scope}`);
+  console.log(`[crawl] Work dir: ${workDir}`);
+  console.log(`[crawl] Max pages: ${maxPages}`);
 
   const assetsDir = path.join(workDir, 'assets');
   const htmlDir = path.join(workDir, 'html');
@@ -166,6 +234,7 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
   const visited = new Set<string>();
   const queue: string[] = [];
   let totalBytes = 0;
+  let failedPages = 0;
 
   // Determine starting URLs
   if (scope === 'partial' && targetPages && targetPages.length > 0) {
@@ -175,7 +244,6 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
     }
   } else {
     queue.push(siteUrl);
-    // Also add /sitemap.xml discovery (best effort)
     queue.push(`${siteUrl}/`);
   }
 
@@ -186,6 +254,9 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
   queue.length = 0;
   queue.push(...uniqueQueue);
 
+  console.log(`[crawl] Starting URLs in queue: ${JSON.stringify(queue)}`);
+
+  console.log(`[crawl] Launching Chromium...`);
   const browser = await chromium.launch({
     headless: true,
     args: [
@@ -197,15 +268,95 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
       '--single-process',
     ],
   });
+  console.log(`[crawl] Chromium launched successfully`);
 
   const context = await browser.newContext({
-    userAgent: 'MetricsLabSpeed/1.0 (build-crawler; +https://metricslab.io)',
+    userAgent: CHROME_USER_AGENT,
     viewport: { width: 1440, height: 900 },
     ignoreHTTPSErrors: true,
   });
+  console.log(`[crawl] Browser context created with UA: ${CHROME_USER_AGENT}`);
 
   try {
-    // BFS crawl with concurrency
+    // ── First, crawl the homepage with retry logic (critical page) ──
+    if (queue.length > 0) {
+      const homepageUrl = queue.shift()!;
+      const homepagePath = urlToPath(homepageUrl, siteUrl);
+      visited.add(homepagePath);
+
+      console.log(`[crawl] Crawling homepage: ${homepageUrl} (path: ${homepagePath})`);
+
+      try {
+        const { page, status } = await navigateWithRetry(context, homepageUrl, {
+          timeout: pageTimeout,
+          maxRetries: 3,
+        });
+
+        try {
+          const { html, title, internalLinks, assetUrls } = await extractPageData(page, siteUrl);
+          const contentHash = hashContent(html);
+
+          console.log(`[crawl] Homepage extracted: title="${title}", html=${html.length} bytes, links=${internalLinks.length}, assets=${assetUrls.length}`);
+
+          // Download and register assets
+          const pageAssets: string[] = [];
+          for (const assetUrl of assetUrls) {
+            if (!assetUrl || assetUrl.startsWith('data:')) continue;
+            const localPath = await downloadAsset(assetUrl, workDir, assetsDir, assetRegistry);
+            if (localPath) pageAssets.push(localPath);
+          }
+
+          // Rewrite asset URLs in HTML
+          let processedHtml = html;
+          for (const [originalUrl, asset] of assetRegistry) {
+            processedHtml = processedHtml.split(originalUrl).join(`/${asset.localPath}`);
+          }
+
+          // Save HTML
+          const htmlFilename = homepagePath === '/' ? 'index.html' : `${homepagePath.slice(1).replace(/\/$/, '')}/index.html`;
+          const htmlPath = path.join(htmlDir, htmlFilename);
+          await fs.mkdir(path.dirname(htmlPath), { recursive: true });
+          await fs.writeFile(htmlPath, processedHtml, 'utf-8');
+
+          const pageSize = Buffer.byteLength(processedHtml, 'utf-8');
+          totalBytes += pageSize;
+
+          crawledPages.push({
+            path: homepagePath,
+            title,
+            html: processedHtml,
+            contentHash,
+            assets: pageAssets,
+          });
+
+          // Add discovered internal links
+          let linksAdded = 0;
+          for (const link of internalLinks) {
+            if (isSameOrigin(siteUrl, link)) {
+              const linkPath = urlToPath(link, siteUrl);
+              if (!visited.has(linkPath) && !queue.some(q => urlToPath(q, siteUrl) === linkPath)) {
+                if (linkPath.match(/\.(jpg|jpeg|png|gif|svg|pdf|zip|doc|mp4|mp3|css|js)$/i)) continue;
+                if (linkPath.includes('wp-admin') || linkPath.includes('wp-login')) continue;
+                if (linkPath.includes('?') && linkPath.includes('replytocom=')) continue;
+                queue.push(`${siteUrl}${linkPath}`);
+                linksAdded++;
+              }
+            }
+          }
+
+          console.log(`[crawl] Homepage crawled: ${homepagePath} (${title}) - ${pageSize} bytes, ${linksAdded} new links queued`);
+        } finally {
+          await page.close();
+        }
+      } catch (err) {
+        console.error(`[crawl] HOMEPAGE CRAWL FAILED after all retries: ${(err as Error).message}`);
+        failedPages++;
+      }
+    }
+
+    // ── BFS crawl remaining pages ──
+    console.log(`[crawl] Starting BFS crawl. Queue has ${queue.length} URLs after homepage.`);
+
     while (queue.length > 0 && crawledPages.length < maxPages) {
       const batch = queue.splice(0, concurrency);
       const promises = batch.map(async (url) => {
@@ -218,11 +369,31 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
 
         let page: Page | null = null;
         try {
+          console.log(`[crawl] Crawling: ${url} (path: ${pagePath})`);
           page = await context.newPage();
-          await page.goto(url, {
-            waitUntil: 'networkidle',
+
+          const response = await page.goto(url, {
+            waitUntil: 'domcontentloaded',
             timeout: pageTimeout,
           });
+
+          const status = response?.status() ?? 0;
+          console.log(`[crawl] Response: status=${status} for ${url}`);
+
+          if (status === 403 || status === 503) {
+            console.warn(`[crawl] Skipping ${url}: possible bot protection (status ${status})`);
+            failedPages++;
+            return;
+          }
+
+          if (status >= 400) {
+            console.warn(`[crawl] Skipping ${url}: HTTP error (status ${status})`);
+            failedPages++;
+            return;
+          }
+
+          // Wait for JS-rendered content
+          await page.waitForTimeout(2000);
 
           const { html, title, internalLinks, assetUrls } = await extractPageData(page, siteUrl);
           const contentHash = hashContent(html);
@@ -231,7 +402,7 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
           if (scope === 'partial') {
             const existing = existingPages.find(p => p.path === pagePath);
             if (existing && existing.contentHash === contentHash) {
-              console.log(`Skipping unchanged page: ${pagePath}`);
+              console.log(`[crawl] Skipping unchanged page: ${pagePath}`);
               return;
             }
           }
@@ -241,19 +412,16 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
           for (const assetUrl of assetUrls) {
             if (!assetUrl || assetUrl.startsWith('data:')) continue;
             const localPath = await downloadAsset(assetUrl, workDir, assetsDir, assetRegistry);
-            if (localPath) {
-              pageAssets.push(localPath);
-            }
+            if (localPath) pageAssets.push(localPath);
           }
 
           // Rewrite asset URLs in HTML
           let processedHtml = html;
           for (const [originalUrl, asset] of assetRegistry) {
-            // Replace all occurrences of the original URL with the local path
             processedHtml = processedHtml.split(originalUrl).join(`/${asset.localPath}`);
           }
 
-          // Save HTML to work directory
+          // Save HTML
           const htmlFilename = pagePath === '/' ? 'index.html' : `${pagePath.slice(1).replace(/\/$/, '')}/index.html`;
           const htmlPath = path.join(htmlDir, htmlFilename);
           await fs.mkdir(path.dirname(htmlPath), { recursive: true });
@@ -270,12 +438,11 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
             assets: pageAssets,
           });
 
-          // Add discovered internal links to the queue
+          // Add discovered internal links
           for (const link of internalLinks) {
             if (isSameOrigin(siteUrl, link)) {
               const linkPath = urlToPath(link, siteUrl);
               if (!visited.has(linkPath) && !queue.some(q => urlToPath(q, siteUrl) === linkPath)) {
-                // Skip common non-page URLs
                 if (linkPath.match(/\.(jpg|jpeg|png|gif|svg|pdf|zip|doc|mp4|mp3|css|js)$/i)) continue;
                 if (linkPath.includes('wp-admin') || linkPath.includes('wp-login')) continue;
                 if (linkPath.includes('?') && linkPath.includes('replytocom=')) continue;
@@ -284,9 +451,10 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
             }
           }
 
-          console.log(`Crawled: ${pagePath} (${title}) - ${pageSize} bytes`);
+          console.log(`[crawl] Crawled: ${pagePath} (${title}) - ${pageSize} bytes`);
         } catch (err) {
-          console.warn(`Failed to crawl ${url}:`, (err as Error).message);
+          console.error(`[crawl] Failed to crawl ${url}:`, (err as Error).message);
+          failedPages++;
         } finally {
           if (page) await page.close();
         }
@@ -300,6 +468,13 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
       totalBytes += asset.sizeBytes;
     }
 
+    console.log(`[crawl] ========== CRAWL COMPLETE ==========`);
+    console.log(`[crawl] Pages crawled: ${crawledPages.length}`);
+    console.log(`[crawl] Pages failed: ${failedPages}`);
+    console.log(`[crawl] Assets downloaded: ${assetRegistry.size}`);
+    console.log(`[crawl] Total bytes: ${totalBytes}`);
+    console.log(`[crawl] Remaining in queue: ${queue.length}`);
+
     return {
       pages: crawledPages,
       assets: assetRegistry,
@@ -309,5 +484,6 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
   } finally {
     await context.close();
     await browser.close();
+    console.log(`[crawl] Browser closed`);
   }
 }

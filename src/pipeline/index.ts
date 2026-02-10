@@ -98,6 +98,16 @@ export async function runBuildPipeline(
       originalSizeBytes: crawlResult.totalBytes,
     });
 
+    // Fail loudly if no pages were crawled
+    if (crawlResult.totalPages === 0) {
+      throw new Error(
+        `Crawl returned 0 pages for ${site.siteUrl}. ` +
+        `The site may be behind bot protection (Cloudflare/LiteSpeed), ` +
+        `unreachable from the build server, or returning error responses. ` +
+        `Check the [crawl] logs above for details.`
+      );
+    }
+
     // ═══ PHASE 2: OPTIMIZE ═══
     await updateBuildStatus(buildId, 'optimizing');
     await notifyDashboard(site, build, 'optimizing');
