@@ -1,3 +1,15 @@
+# ── Stage 1: Build ──
+FROM node:20-slim AS builder
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+# ── Stage 2: Production ──
 FROM node:20-slim
 
 # Install Playwright system dependencies
@@ -11,8 +23,11 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
 
-COPY . .
-RUN npm run build
+# Copy compiled JS from builder
+COPY --from=builder /app/dist ./dist
+
+# Copy Drizzle migrations
+COPY --from=builder /app/drizzle ./drizzle
 
 EXPOSE 3001
 
