@@ -1,0 +1,44 @@
+{
+  "name": "metrics-lab-speed-server",
+  "version": "1.0.0",
+  "description": "Build engine that crawls WordPress sites, optimizes them into static assets, and deploys to Cloudflare's edge network",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@fastify/cors": "^10.0.0",
+    "bullmq": "^5.0.0",
+    "cheerio": "^1.0.0",
+    "clean-css": "^5.3.0",
+    "dotenv": "^16.4.0",
+    "drizzle-orm": "^0.36.0",
+    "fastify": "^5.0.0",
+    "ioredis": "^5.4.0",
+    "nanoid": "^5.0.0",
+    "pino": "^9.0.0",
+    "pino-pretty": "^11.0.0",
+    "playwright": "^1.49.0",
+    "postgres": "^3.4.0",
+    "purgecss": "^6.0.0",
+    "sharp": "^0.33.0",
+    "terser": "^5.36.0"
+  },
+  "devDependencies": {
+    "@types/clean-css": "^4.2.0",
+    "@types/node": "^22.0.0",
+    "drizzle-kit": "^0.28.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

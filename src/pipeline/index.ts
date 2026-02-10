@@ -1,0 +1,203 @@
+import fs from 'fs/promises';
+import { eq } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { sites, builds, pages as pagesTable } from '../db/schema.js';
+import { crawlSite } from './crawl.js';
+import { optimizeAll } from './optimize.js';
+import { deployToCloudflare } from './deploy.js';
+import { measurePerformance } from '../services/lighthouse.js';
+import { notifyDashboard } from '../services/dashboardNotifier.js';
+
+async function updateBuildStatus(buildId: string, status: string) {
+  const updates: Record<string, any> = { status };
+  if (status === 'crawling') {
+    updates.startedAt = new Date();
+  }
+  await db.update(builds).set(updates).where(eq(builds.id, buildId));
+}
+
+async function updateBuild(buildId: string, data: Record<string, any>) {
+  await db.update(builds).set(data).where(eq(builds.id, buildId));
+}
+
+async function updateSite(siteId: string, data: Record<string, any>) {
+  await db.update(sites).set({ ...data, updatedAt: new Date() }).where(eq(sites.id, siteId));
+}
+
+async function getExistingPages(siteId: string) {
+  return db.query.pages.findMany({
+    where: eq(pagesTable.siteId, siteId),
+  });
+}
+
+async function upsertPages(siteId: string, crawledPages: Array<{ path: string; title: string; contentHash: string; originalSizeBytes: number; optimizedSizeBytes: number }>) {
+  const { nanoid } = await import('nanoid');
+
+  for (const page of crawledPages) {
+    const existing = await db.query.pages.findFirst({
+      where: (p, { and, eq: e }) => and(e(p.siteId, siteId), e(p.path, page.path)),
+    });
+
+    if (existing) {
+      await db.update(pagesTable).set({
+        title: page.title,
+        contentHash: page.contentHash,
+        originalSizeBytes: page.originalSizeBytes,
+        optimizedSizeBytes: page.optimizedSizeBytes,
+        lastCrawledAt: new Date(),
+        lastDeployedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(pagesTable.id, existing.id));
+    } else {
+      await db.insert(pagesTable).values({
+        id: `page_${nanoid(12)}`,
+        siteId,
+        path: page.path,
+        title: page.title,
+        contentHash: page.contentHash,
+        originalSizeBytes: page.originalSizeBytes,
+        optimizedSizeBytes: page.optimizedSizeBytes,
+        lastCrawledAt: new Date(),
+        lastDeployedAt: new Date(),
+      });
+    }
+  }
+}
+
+export async function runBuildPipeline(
+  buildId: string,
+  siteId: string,
+  scope: string,
+  targetPages?: string[]
+) {
+  const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
+  if (!site) throw new Error(`Site ${siteId} not found`);
+
+  const build = await db.query.builds.findFirst({ where: eq(builds.id, buildId) });
+  if (!build) throw new Error(`Build ${buildId} not found`);
+
+  const workDir = `/tmp/builds/${buildId}`;
+  await fs.mkdir(workDir, { recursive: true });
+
+  try {
+    // ═══ PHASE 1: CRAWL ═══
+    await updateBuildStatus(buildId, 'crawling');
+    await notifyDashboard(site, build, 'crawling');
+
+    const existingPages = scope === 'partial' ? await getExistingPages(siteId) : [];
+    const crawlResult = await crawlSite({
+      siteUrl: site.siteUrl,
+      workDir,
+      scope,
+      existingPages: existingPages.map(p => ({ path: p.path, contentHash: p.contentHash ?? '' })),
+      targetPages,
+    });
+
+    await updateBuild(buildId, {
+      pagesTotal: crawlResult.totalPages,
+      originalSizeBytes: crawlResult.totalBytes,
+    });
+
+    // ═══ PHASE 2: OPTIMIZE ═══
+    await updateBuildStatus(buildId, 'optimizing');
+    await notifyDashboard(site, build, 'optimizing');
+
+    const optimizeResult = await optimizeAll({
+      pages: crawlResult.pages,
+      assets: crawlResult.assets,
+      workDir,
+      siteUrl: site.siteUrl,
+      onPageProcessed: async (pageIndex: number) => {
+        await updateBuild(buildId, { pagesProcessed: pageIndex + 1 });
+      },
+    });
+
+    await updateBuild(buildId, {
+      jsOriginalBytes: optimizeResult.stats.js.originalBytes,
+      jsOptimizedBytes: optimizeResult.stats.js.optimizedBytes,
+      cssOriginalBytes: optimizeResult.stats.css.originalBytes,
+      cssOptimizedBytes: optimizeResult.stats.css.optimizedBytes,
+      imageOriginalBytes: optimizeResult.stats.images.originalBytes,
+      imageOptimizedBytes: optimizeResult.stats.images.optimizedBytes,
+      facadesApplied: optimizeResult.stats.facades.total,
+      scriptsRemoved: optimizeResult.stats.scriptsRemoved,
+    });
+
+    // ═══ PHASE 3: DEPLOY ═══
+    await updateBuildStatus(buildId, 'deploying');
+    await notifyDashboard(site, build, 'deploying');
+
+    const deployResult = await deployToCloudflare({
+      projectName: site.cloudflareProjectName ?? `mls-${siteId}`,
+      outputDir: `${workDir}/output`,
+      siteUrl: site.siteUrl,
+    });
+
+    // ═══ PHASE 4: MEASURE ═══
+    let originalScore = { performance: 0, ttfb: 0 };
+    let edgeScore = { performance: 0, ttfb: 0 };
+
+    try {
+      [originalScore, edgeScore] = await Promise.all([
+        measurePerformance(site.siteUrl),
+        measurePerformance(deployResult.url),
+      ]);
+    } catch (err) {
+      console.error('Lighthouse measurement failed (non-fatal):', err);
+    }
+
+    // ═══ PHASE 5: FINALIZE ═══
+    const startedAt = build.startedAt ? new Date(build.startedAt).getTime() : Date.now();
+    await updateBuild(buildId, {
+      status: 'success',
+      optimizedSizeBytes: optimizeResult.totalOptimizedBytes,
+      lighthouseScoreBefore: originalScore.performance,
+      lighthouseScoreAfter: edgeScore.performance,
+      ttfbBefore: originalScore.ttfb,
+      ttfbAfter: edgeScore.ttfb,
+      completedAt: new Date(),
+    });
+
+    await updateSite(siteId, {
+      lastBuildId: buildId,
+      lastBuildStatus: 'success',
+      lastBuildAt: new Date(),
+      edgeUrl: deployResult.url,
+      pageCount: crawlResult.totalPages,
+      totalSizeBytes: optimizeResult.totalOptimizedBytes,
+    });
+
+    // Save/update page records for future partial builds
+    await upsertPages(siteId, optimizeResult.pages.map(p => ({
+      path: p.path,
+      title: p.title,
+      contentHash: p.contentHash,
+      originalSizeBytes: p.originalSizeBytes,
+      optimizedSizeBytes: p.optimizedSizeBytes,
+    })));
+
+    await notifyDashboard(site, build, 'success');
+
+  } catch (error: any) {
+    const currentBuild = await db.query.builds.findFirst({ where: eq(builds.id, buildId) });
+    await updateBuild(buildId, {
+      status: 'failed',
+      errorMessage: error.message,
+      errorDetails: { stack: error.stack, phase: currentBuild?.status ?? 'unknown' },
+      completedAt: new Date(),
+    });
+
+    await updateSite(siteId, {
+      lastBuildId: buildId,
+      lastBuildStatus: 'failed',
+      lastBuildAt: new Date(),
+    });
+
+    await notifyDashboard(site, build, 'failed');
+
+    throw error; // Re-throw so BullMQ marks the job as failed
+  } finally {
+    // Clean up the work directory
+    await fs.rm(workDir, { recursive: true, force: true });
+  }
+}
