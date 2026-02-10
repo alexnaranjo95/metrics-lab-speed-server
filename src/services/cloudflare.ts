@@ -1,7 +1,10 @@
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import { config } from '../config.js';
-import { hashContent } from '../utils/crypto.js';
+
+const execFileAsync = promisify(execFile);
 
 const CF_API_BASE = 'https://api.cloudflare.com/client/v4';
 
@@ -42,7 +45,7 @@ export async function createPagesProject(projectName: string): Promise<void> {
     );
 
     if (response.ok) {
-      console.log(`Created Cloudflare Pages project: ${projectName}`);
+      console.log(`[deploy] Created Cloudflare Pages project: ${projectName}`);
       return;
     }
 
@@ -50,7 +53,7 @@ export async function createPagesProject(projectName: string): Promise<void> {
 
     // 8000007 = project already exists
     if (data.errors?.some(e => e.code === 8000007)) {
-      console.log(`Cloudflare Pages project already exists: ${projectName}`);
+      console.log(`[deploy] Cloudflare Pages project already exists: ${projectName}`);
       return;
     }
 
@@ -62,33 +65,40 @@ export async function createPagesProject(projectName: string): Promise<void> {
 }
 
 /**
- * Recursively collect all files in a directory.
+ * Count files recursively in a directory.
  */
-async function collectFiles(dir: string, baseDir: string): Promise<Array<{ path: string; content: Buffer }>> {
-  const files: Array<{ path: string; content: Buffer }> = [];
+async function countFiles(dir: string): Promise<{ count: number; totalBytes: number }> {
+  let count = 0;
+  let totalBytes = 0;
 
   try {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name as string);
-    if (entry.isDirectory()) {
-      const subFiles = await collectFiles(fullPath, baseDir);
-      files.push(...subFiles);
-    } else if (entry.isFile()) {
-      const content = await fs.readFile(fullPath);
-      const relativePath = '/' + path.relative(baseDir, fullPath);
-      files.push({ path: relativePath, content });
-    }
+      if (entry.isDirectory()) {
+        const sub = await countFiles(fullPath);
+        count += sub.count;
+        totalBytes += sub.totalBytes;
+      } else if (entry.isFile()) {
+        const stat = await fs.stat(fullPath);
+        count++;
+        totalBytes += stat.size;
+      }
     }
   } catch {
-    return files;
+    // directory doesn't exist or can't be read
   }
 
-  return files;
+  return { count, totalBytes };
 }
 
 /**
- * Deploy files to Cloudflare Pages using the Direct Upload API.
+ * Deploy files to Cloudflare Pages using wrangler CLI.
+ * Wrangler handles the full Direct Upload API flow correctly:
+ * 1. Get upload token
+ * 2. Upload files in batches
+ * 3. Upsert hashes
+ * 4. Create deployment with manifest
  */
 export async function deployToPages(
   projectName: string,
@@ -96,66 +106,87 @@ export async function deployToPages(
 ): Promise<{ url: string; deploymentId: string; filesUploaded: number; totalSizeBytes: number }> {
   const accountId = getAccountId();
 
-  // Collect all files from the output directory
-  const files = await collectFiles(outputDir, outputDir);
+  // Count files first for reporting
+  const { count: filesCount, totalBytes } = await countFiles(outputDir);
 
-  if (files.length === 0) {
+  if (filesCount === 0) {
     throw new Error('No files to deploy');
   }
 
-  // Build the manifest: { "/path/to/file": hash }
-  const manifest: Record<string, string> = {};
-  const filesByHash = new Map<string, Buffer>();
-  let totalSizeBytes = 0;
+  console.log(`[deploy] Deploying ${filesCount} files (${totalBytes} bytes) to Cloudflare Pages project: ${projectName}`);
+  console.log(`[deploy] Output directory: ${outputDir}`);
 
-  for (const file of files) {
-    const hash = hashContent(file.content.toString('base64'));
-    manifest[file.path] = hash;
-    filesByHash.set(hash, file.content);
-    totalSizeBytes += file.content.length;
+  // List first few files for debugging
+  try {
+    const topEntries = await fs.readdir(outputDir);
+    console.log(`[deploy] Top-level entries in output dir: ${topEntries.join(', ')}`);
+  } catch (err) {
+    console.error(`[deploy] Cannot read output dir:`, (err as Error).message);
   }
 
-  // Step 1: Create deployment and upload manifest
-  const formData = new FormData();
-  formData.append('manifest', JSON.stringify(manifest));
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      'npx',
+      [
+        'wrangler',
+        'pages',
+        'deploy',
+        outputDir,
+        '--project-name', projectName,
+        '--branch', 'main',
+        '--commit-message', `Build deployment at ${new Date().toISOString()}`,
+      ],
+      {
+        env: {
+          ...process.env,
+          CLOUDFLARE_ACCOUNT_ID: accountId,
+          CLOUDFLARE_API_TOKEN: config.CLOUDFLARE_API_TOKEN,
+        },
+        timeout: 5 * 60 * 1000, // 5 minute timeout
+        maxBuffer: 10 * 1024 * 1024, // 10MB buffer for output
+      }
+    );
 
-  // Add each file as a blob
-  for (const [hash, content] of filesByHash) {
-    formData.append(hash, new Blob([new Uint8Array(content)]));
-  }
-
-  const response = await fetch(
-    `${CF_API_BASE}/accounts/${accountId}/pages/projects/${projectName}/deployments`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${config.CLOUDFLARE_API_TOKEN}`,
-      },
-      body: formData,
+    console.log(`[deploy] Wrangler stdout:\n${stdout}`);
+    if (stderr) {
+      console.log(`[deploy] Wrangler stderr:\n${stderr}`);
     }
-  );
 
-  if (!response.ok) {
-    const errorData = await response.text();
-    throw new Error(`Cloudflare deployment failed: ${response.status} ${errorData}`);
-  }
+    // Parse deployment URL from wrangler output
+    // Wrangler outputs lines like:
+    //   ✨ Deployment complete! Take a peek over at https://abc123.project-name.pages.dev
+    //   or: https://abc123.project-name.pages.dev
+    let url = `https://${projectName}.pages.dev`;
+    let deploymentId = 'unknown';
 
-  const data = await response.json() as {
-    result?: {
-      id: string;
-      url: string;
+    const urlMatch = stdout.match(/https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.pages\.dev/i);
+    if (urlMatch) {
+      url = urlMatch[0];
+      // Extract deployment ID from the subdomain (e.g., "abc123" from "abc123.project-name.pages.dev")
+      const idMatch = url.match(/https:\/\/([a-z0-9]+)\./i);
+      if (idMatch) {
+        deploymentId = idMatch[1];
+      }
+    }
+
+    console.log(`[deploy] Deployment complete: url=${url}, deploymentId=${deploymentId}, files=${filesCount}`);
+
+    return {
+      url,
+      deploymentId,
+      filesUploaded: filesCount,
+      totalSizeBytes: totalBytes,
     };
-  };
-
-  const deploymentId = data.result?.id ?? 'unknown';
-  const url = data.result?.url ?? `https://${projectName}.pages.dev`;
-
-  return {
-    url,
-    deploymentId,
-    filesUploaded: files.length,
-    totalSizeBytes,
-  };
+  } catch (err: any) {
+    // execFileAsync throws with stdout/stderr on the error object
+    const stdout = err.stdout || '';
+    const stderr = err.stderr || '';
+    console.error(`[deploy] Wrangler deployment failed!`);
+    console.error(`[deploy] Exit code: ${err.code}`);
+    console.error(`[deploy] stdout:\n${stdout}`);
+    console.error(`[deploy] stderr:\n${stderr}`);
+    throw new Error(`Cloudflare deployment failed: ${err.message}\nstdout: ${stdout}\nstderr: ${stderr}`);
+  }
 }
 
 /**
@@ -174,13 +205,13 @@ export async function deletePagesProject(projectName: string): Promise<void> {
     );
 
     if (response.ok || response.status === 404) {
-      console.log(`Deleted Cloudflare Pages project: ${projectName}`);
+      console.log(`[deploy] Deleted Cloudflare Pages project: ${projectName}`);
       return;
     }
 
     const data = await response.text();
-    console.warn(`Failed to delete Pages project ${projectName}: ${data}`);
+    console.warn(`[deploy] Failed to delete Pages project ${projectName}: ${data}`);
   } catch (err) {
-    console.warn(`Error deleting Pages project ${projectName}:`, (err as Error).message);
+    console.warn(`[deploy] Error deleting Pages project ${projectName}:`, (err as Error).message);
   }
 }
