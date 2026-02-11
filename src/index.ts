@@ -93,6 +93,7 @@ async function start() {
   console.log(`NODE_ENV: ${config.NODE_ENV}`);
   console.log(`Client dist path: ${clientDistPath}`);
   console.log(`API key configured: ${config.MASTER_API_KEY !== 'dev_master_key_change_in_production' ? 'yes' : 'USING DEFAULT (check env vars!)'}`);
+  console.log(`Claude AI integration: ${config.ANTHROPIC_API_KEY ? 'READY' : 'DISABLED (no ANTHROPIC_API_KEY)'}`);
 
   if (clientDistExists) {
     await app.register(fastifyStatic, {

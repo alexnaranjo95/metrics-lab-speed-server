@@ -114,22 +114,31 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
 
   // ═══ STEP 3: Optimize image assets (Sharp + responsive + SVGO) ═══
   if (buildId) buildEmitter.emitPhase(buildId, 'images');
-  emit('images', 'info', `Optimizing ${[...assets.entries()].filter(([, a]) => a.type === 'image').length} images...`);
-  console.log(`[optimize] Step 3: Optimizing image assets...`);
   const imageAssets = [...assets.entries()].filter(([, a]) => a.type === 'image');
 
-  for (const [url, asset] of imageAssets) {
-    try {
-      const result = await optimizeImage(asset.localPath, workDir, settings);
-      stats.images.originalBytes += result.originalBytes;
-      stats.images.optimizedBytes += result.optimizedBytes;
-      emit('images', 'info', `Optimized ${asset.localPath}`, { assetUrl: url, savings: { before: result.originalBytes, after: result.optimizedBytes } });
-    } catch (err) {
-      emit('images', 'warn', `Image optimization failed for ${url}: ${(err as Error).message}`);
-      console.warn(`[optimize] Image optimization failed for ${url}:`, (err as Error).message);
+  if (!settings.images.enabled) {
+    emit('images', 'info', 'Image optimization disabled — skipping');
+    console.log(`[optimize] Step 3: Image optimization disabled (images.enabled=false) — skipping`);
+  } else {
+    emit('images', 'info', `Optimizing ${imageAssets.length} images...`);
+    console.log(`[optimize] Step 3: Optimizing image assets...`);
+    const imgLog = `WebP=${settings.images.webp.quality}, AVIF=${settings.images.avif.quality}, JPEG=${settings.images.jpeg.quality}, maxWidth=${settings.images.maxWidth}, convertToWebp=${settings.images.convertToWebp}, convertToAvif=${settings.images.convertToAvif}, srcset=${settings.images.generateSrcset}`;
+    emit('images', 'info', `Using settings: ${imgLog}`);
+    console.log(`[optimize] Image settings: ${imgLog}`);
+
+    for (const [url, asset] of imageAssets) {
+      try {
+        const result = await optimizeImage(asset.localPath, workDir, settings);
+        stats.images.originalBytes += result.originalBytes;
+        stats.images.optimizedBytes += result.optimizedBytes;
+        emit('images', 'info', `Optimized ${asset.localPath}`, { assetUrl: url, savings: { before: result.originalBytes, after: result.optimizedBytes } });
+      } catch (err) {
+        emit('images', 'warn', `Image optimization failed for ${url}: ${(err as Error).message}`);
+        console.warn(`[optimize] Image optimization failed for ${url}:`, (err as Error).message);
+      }
     }
+    console.log(`[optimize] Images: ${stats.images.originalBytes} → ${stats.images.optimizedBytes} bytes`);
   }
-  console.log(`[optimize] Images: ${stats.images.originalBytes} → ${stats.images.optimizedBytes} bytes`);
 
   // ═══ STEP 4: Process each page's HTML ═══
   if (buildId) buildEmitter.emitPhase(buildId, 'html');
@@ -177,18 +186,22 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       console.error(`[optimize] Widget facade replacement failed for ${page.path}:`, (err as Error).message);
     }
 
-    // 4e. Image tag rewriting (<picture>, lazy loading, fetchpriority)
-    try {
-      html = rewriteImageTags(html, workDir);
-    } catch (err) {
-      console.error(`[optimize] Image tag rewriting failed for ${page.path}:`, (err as Error).message);
-    }
+    // 4e. Image tag rewriting (<picture>, lazy loading, fetchpriority) — only when images.enabled
+    if (settings.images.enabled) {
+      try {
+        html = rewriteImageTags(html, workDir, settings);
+      } catch (err) {
+        console.error(`[optimize] Image tag rewriting failed for ${page.path}:`, (err as Error).message);
+      }
 
-    // 4f. Inject width/height on images for CLS prevention
-    try {
-      html = await injectImageDimensions(html, workDir);
-    } catch (err) {
-      console.error(`[optimize] Image dimension injection failed for ${page.path}:`, (err as Error).message);
+      // 4f. Inject width/height on images for CLS prevention
+      if (settings.images.addDimensions) {
+        try {
+          html = await injectImageDimensions(html, workDir);
+        } catch (err) {
+          console.error(`[optimize] Image dimension injection failed for ${page.path}:`, (err as Error).message);
+        }
+      }
     }
 
     // 4g. Font optimization (self-host Google Fonts, preload)

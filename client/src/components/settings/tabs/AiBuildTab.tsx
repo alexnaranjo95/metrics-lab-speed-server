@@ -1,3 +1,6 @@
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import { SettingField, SettingCard, Toggle, Select, Slider } from '../SettingField';
 
 interface Props {
@@ -8,13 +11,61 @@ interface Props {
 }
 
 export function AiBuildTab({ settings, defaults, diff, onChange }: Props) {
+  const { data: aiUsage } = useQuery({
+    queryKey: ['ai-usage'],
+    queryFn: () => api.getAIUsage(),
+    enabled: !!localStorage.getItem('apiKey'),
+  });
+
   return (
     <div>
+      {/* AI Status Banner */}
+      {aiUsage && (
+        <div className={cn(
+          'rounded-lg p-4 mb-4 border',
+          aiUsage.available
+            ? 'bg-[hsl(var(--success))]/5 border-[hsl(var(--success))]/20'
+            : 'bg-[hsl(var(--muted))]/30 border-[hsl(var(--border))]'
+        )}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <span className={cn('w-2.5 h-2.5 rounded-full', aiUsage.available ? 'bg-[hsl(var(--success))]' : 'bg-[hsl(var(--muted-foreground))]')} />
+              <span className="text-sm font-medium">
+                {aiUsage.available ? 'Claude API Connected' : 'Claude API Not Configured'}
+              </span>
+            </div>
+            {!aiUsage.available && (
+              <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                Set ANTHROPIC_API_KEY in environment variables
+              </span>
+            )}
+          </div>
+          {aiUsage.available && (
+            <div>
+              <div className="flex items-center justify-between text-xs text-[hsl(var(--muted-foreground))] mb-1">
+                <span>Monthly usage: ${aiUsage.estimatedCost.toFixed(2)} / ${aiUsage.monthlyCap}</span>
+                <span>{aiUsage.percentUsed.toFixed(1)}%</span>
+              </div>
+              <div className="h-2 bg-[hsl(var(--muted))] rounded-full overflow-hidden">
+                <div
+                  className={cn('h-full rounded-full transition-all', aiUsage.percentUsed > 80 ? 'bg-[hsl(var(--warning))]' : 'bg-[hsl(var(--success))]')}
+                  style={{ width: `${Math.min(100, aiUsage.percentUsed)}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-[10px] text-[hsl(var(--muted-foreground))] mt-1">
+                <span>{aiUsage.inputTokens.toLocaleString()} input + {aiUsage.outputTokens.toLocaleString()} output tokens</span>
+                <span>{aiUsage.currentMonth}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <SettingCard title="AI Optimization" description="AI-powered content optimization using Anthropic's Claude API">
-        <SettingField label="Enable AI Optimization" description="Requires Claude API key" isOverridden={diff?.ai?.enabled}>
+        <SettingField label="Enable AI Optimization" description="Runs after standard optimization, before deployment" isOverridden={diff?.ai?.enabled}>
           <Toggle checked={settings.ai.enabled} onChange={(v) => onChange('ai', { enabled: v })} />
         </SettingField>
-        <SettingField label="Model" description="Sonnet = fast/cheap. Opus = highest quality (~10x cost)." isOverridden={diff?.ai?.model}>
+        <SettingField label="Model" description="Sonnet ~$0.25/page. Opus ~$2.50/page. Haiku ~$0.05/page." isOverridden={diff?.ai?.model}>
           <Select
             value={settings.ai.model}
             options={[

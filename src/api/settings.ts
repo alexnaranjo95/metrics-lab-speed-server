@@ -5,8 +5,43 @@ import { sites, assetOverrides, settingsHistory } from '../db/schema.js';
 import { validateSettingsOverride, APP_DEFAULTS } from '../shared/settingsSchema.js';
 import { resolveSettingsFromData, diffSettings, matchUrlPattern, invalidateSettingsCache } from '../shared/settingsMerge.js';
 import { requireMasterKey } from '../middleware/auth.js';
+import { isAIAvailable, getMonthlyUsage } from '../services/aiOptimizer.js';
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
+
+  // ─── GET AI usage stats ─────────────────────────────────────────
+  app.get(
+    '/ai/usage',
+    { preHandler: [requireMasterKey] },
+    async (_req, reply) => {
+      const usage = await getMonthlyUsage();
+      const now = new Date();
+      const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const monthlyCap = APP_DEFAULTS.ai.monthlyCostCap;
+
+      return reply.send({
+        available: isAIAvailable(),
+        currentMonth,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        estimatedCost: Math.round(usage.estimatedCost * 100) / 100,
+        monthlyCap,
+        percentUsed: monthlyCap > 0 ? Math.round((usage.estimatedCost / monthlyCap) * 1000) / 10 : 0,
+      });
+    }
+  );
+
+  // ─── GET AI availability status ─────────────────────────────────
+  app.get(
+    '/ai/status',
+    { preHandler: [requireMasterKey] },
+    async (_req, reply) => {
+      return reply.send({
+        available: isAIAvailable(),
+        model: APP_DEFAULTS.ai.model,
+      });
+    }
+  );
   // ─── GET resolved settings for a site ───────────────────────────
   app.get<{ Params: { siteId: string }; Querystring: { assetUrl?: string } }>(
     '/sites/:siteId/settings',

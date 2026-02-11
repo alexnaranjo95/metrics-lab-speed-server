@@ -6,7 +6,7 @@ import { EventEmitter } from 'events';
 export interface BuildLogEvent {
   timestamp: string;
   level: 'info' | 'warn' | 'error' | 'debug';
-  phase: 'crawl' | 'images' | 'css' | 'js' | 'html' | 'fonts' | 'deploy' | 'measure';
+  phase: 'crawl' | 'images' | 'css' | 'js' | 'html' | 'fonts' | 'ai' | 'deploy' | 'measure';
   message: string;
   meta?: {
     pageUrl?: string;

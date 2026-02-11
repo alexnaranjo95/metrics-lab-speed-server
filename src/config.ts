@@ -39,6 +39,9 @@ export const config = {
     process.env.SPEED_BUILD_SERVER_MASTER_KEY ?? 'dev_master_key_change_in_production'
   ),
 
+  // AI (Claude)
+  ANTHROPIC_API_KEY: optionalEnv('ANTHROPIC_API_KEY') as string | undefined,
+
   // Cloudflare
   CLOUDFLARE_ACCOUNT_ID: optionalEnv('CLOUDFLARE_ACCOUNT_ID'),
   CLOUDFLARE_API_TOKEN: optionalEnv('CLOUDFLARE_API_TOKEN'),

@@ -2,7 +2,6 @@ import fs from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
 import { optimize as svgoOptimize } from 'svgo';
-import { hashContent } from '../utils/crypto.js';
 import type { OptimizationSettings } from '../shared/settingsSchema.js';
 
 // Default responsive widths for use in rewriteImageTags (used when no settings passed)
@@ -18,7 +17,7 @@ export interface ImageOptimizeResult {
 
 /**
  * Optimize a single image file with Sharp.
- * Creates WebP/AVIF variants and responsive sizes.
+ * Creates WebP/AVIF variants and responsive sizes per settings.
  */
 export async function optimizeImage(
   imageRelativePath: string,
@@ -26,14 +25,22 @@ export async function optimizeImage(
   settings?: OptimizationSettings
 ): Promise<ImageOptimizeResult> {
   // Derive quality settings from resolved settings or use defaults
-  const JPEG_QUALITY = settings?.images.jpeg.quality ?? 80;
-  const PNG_QUALITY = settings?.images.jpeg.quality ?? 80;
-  const WEBP_QUALITY = settings?.images.webp.quality ?? 80;
-  const AVIF_QUALITY = settings?.images.avif.quality ?? 50;
-  const WEBP_EFFORT = settings?.images.webp.effort ?? 4;
-  const AVIF_EFFORT = settings?.images.avif.effort ?? 4;
-  const RESPONSIVE_WIDTHS = settings?.images.breakpoints ?? [320, 640, 768, 1024, 1280, 1920];
-  const MAX_WIDTH = settings?.images.maxWidth ?? 2560;
+  const imgs = settings?.images;
+  const JPEG_QUALITY = imgs?.jpeg?.quality ?? 80;
+  const PNG_QUALITY = imgs?.jpeg?.quality ?? 80;
+  const WEBP_QUALITY = imgs?.webp?.quality ?? 80;
+  const AVIF_QUALITY = imgs?.avif?.quality ?? 50;
+  const WEBP_EFFORT = imgs?.webp?.effort ?? 4;
+  const AVIF_EFFORT = imgs?.avif?.effort ?? 4;
+  const RESPONSIVE_WIDTHS = imgs?.breakpoints ?? [320, 640, 768, 1024, 1280, 1920];
+  const MAX_WIDTH = imgs?.maxWidth ?? 2560;
+  const convertToWebp = imgs?.convertToWebp ?? true;
+  const convertToAvif = imgs?.convertToAvif ?? false;
+  const generateSrcset = imgs?.generateSrcset ?? true;
+  const keepOriginalAsFallback = imgs?.keepOriginalAsFallback ?? true;
+  const stripMetadata = imgs?.stripMetadata ?? true;
+  const optimizeSvgEnabled = imgs?.optimizeSvg ?? true;
+
   const imagePath = path.join(workDir, imageRelativePath);
 
   let inputBuffer: Buffer;
@@ -46,9 +53,9 @@ export async function optimizeImage(
   const originalBytes = inputBuffer.length;
   const ext = path.extname(imagePath).toLowerCase();
 
-  // SVG: use SVGO
+  // SVG: use SVGO only when optimizeSvg is enabled
   if (ext === '.svg') {
-    return optimizeSvg(imagePath, inputBuffer);
+    return optimizeSvg(imagePath, inputBuffer, optimizeSvgEnabled);
   }
 
   // Skip ICO and GIF (animated GIFs would break)
@@ -65,6 +72,7 @@ export async function optimizeImage(
       jpegQuality: JPEG_QUALITY, pngQuality: PNG_QUALITY,
       webpQuality: WEBP_QUALITY, webpEffort: WEBP_EFFORT,
       avifQuality: AVIF_QUALITY, avifEffort: AVIF_EFFORT, maxWidth: MAX_WIDTH,
+      stripMetadata,
     });
 
     // Only use optimized if smaller
@@ -76,12 +84,14 @@ export async function optimizeImage(
 
     const optimizedBytes = Math.min(optimizedBuffer.length, originalBytes);
 
-    // Generate WebP variant
+    // Generate WebP variant (only when convertToWebp)
     let webpPath: string | undefined;
-    if (ext !== '.webp' && ext !== '.avif') {
+    if (convertToWebp && ext !== '.webp' && ext !== '.avif') {
       try {
-        const webpBuffer = await sharp(inputBuffer)
-          .resize({ width: Math.min(srcWidth, MAX_WIDTH), withoutEnlargement: true })
+        let pipeline = sharp(inputBuffer)
+          .resize({ width: Math.min(srcWidth, MAX_WIDTH), withoutEnlargement: true });
+        if (stripMetadata) pipeline = pipeline.withMetadata(false);
+        const webpBuffer = await pipeline
           .webp({ quality: WEBP_QUALITY, effort: WEBP_EFFORT })
           .toBuffer();
         webpPath = imagePath.replace(/\.[^.]+$/, '.webp');
@@ -89,12 +99,14 @@ export async function optimizeImage(
       } catch { /* non-fatal */ }
     }
 
-    // Generate AVIF variant
+    // Generate AVIF variant (only when convertToAvif)
     let avifPath: string | undefined;
-    if (ext !== '.avif') {
+    if (convertToAvif && ext !== '.avif') {
       try {
-        const avifBuffer = await sharp(inputBuffer)
-          .resize({ width: Math.min(srcWidth, MAX_WIDTH), withoutEnlargement: true })
+        let pipeline = sharp(inputBuffer)
+          .resize({ width: Math.min(srcWidth, MAX_WIDTH), withoutEnlargement: true });
+        if (stripMetadata) pipeline = pipeline.withMetadata(false);
+        const avifBuffer = await pipeline
           .avif({ quality: AVIF_QUALITY, effort: AVIF_EFFORT })
           .toBuffer();
         avifPath = imagePath.replace(/\.[^.]+$/, '.avif');
@@ -102,18 +114,29 @@ export async function optimizeImage(
       } catch { /* non-fatal */ }
     }
 
-    // Generate responsive sizes (WebP only for srcset)
+    // Generate responsive sizes (only when generateSrcset and convertToWebp)
     const responsivePaths: string[] = [];
-    for (const w of RESPONSIVE_WIDTHS) {
-      if (w >= srcWidth) continue; // Don't upscale
+    if (generateSrcset && convertToWebp) {
+      for (const w of RESPONSIVE_WIDTHS) {
+        if (w >= srcWidth) continue; // Don't upscale
+        try {
+          let pipeline = sharp(inputBuffer)
+            .resize({ width: w, withoutEnlargement: true });
+          if (stripMetadata) pipeline = pipeline.withMetadata(false);
+          const resizedBuffer = await pipeline
+            .webp({ quality: WEBP_QUALITY, effort: WEBP_EFFORT })
+            .toBuffer();
+          const resizedPath = imagePath.replace(/\.[^.]+$/, `-${w}w.webp`);
+          await fs.writeFile(resizedPath, resizedBuffer);
+          responsivePaths.push(resizedPath);
+        } catch { /* non-fatal */ }
+      }
+    }
+
+    // When keepOriginalAsFallback is false, remove original if we have WebP
+    if (!keepOriginalAsFallback && webpPath) {
       try {
-        const resizedBuffer = await sharp(inputBuffer)
-          .resize({ width: w, withoutEnlargement: true })
-          .webp({ quality: WEBP_QUALITY, effort: WEBP_EFFORT })
-          .toBuffer();
-        const resizedPath = imagePath.replace(/\.[^.]+$/, `-${w}w.webp`);
-        await fs.writeFile(resizedPath, resizedBuffer);
-        responsivePaths.push(resizedPath);
+        await fs.unlink(imagePath);
       } catch { /* non-fatal */ }
     }
 
@@ -129,10 +152,12 @@ interface FormatOptions {
   webpQuality: number; webpEffort: number;
   avifQuality: number; avifEffort: number;
   maxWidth: number;
+  stripMetadata: boolean;
 }
 
 async function optimizeByFormat(input: Buffer, ext: string, srcWidth: number, opts: FormatOptions): Promise<Buffer> {
-  const pipeline = sharp(input).resize({ width: Math.min(srcWidth, opts.maxWidth), withoutEnlargement: true });
+  let pipeline = sharp(input).resize({ width: Math.min(srcWidth, opts.maxWidth), withoutEnlargement: true });
+  if (opts.stripMetadata) pipeline = pipeline.withMetadata(false);
 
   switch (ext) {
     case '.jpg':
@@ -149,8 +174,9 @@ async function optimizeByFormat(input: Buffer, ext: string, srcWidth: number, op
   }
 }
 
-async function optimizeSvg(imagePath: string, inputBuffer: Buffer): Promise<ImageOptimizeResult> {
+async function optimizeSvg(imagePath: string, inputBuffer: Buffer, enabled: boolean): Promise<ImageOptimizeResult> {
   const originalBytes = inputBuffer.length;
+  if (!enabled) return { originalBytes, optimizedBytes: originalBytes };
   try {
     const svgString = inputBuffer.toString('utf-8');
     const result = svgoOptimize(svgString, {
@@ -186,19 +212,63 @@ export async function getImageDimensions(filePath: string): Promise<{ width: num
   return null;
 }
 
+/** Image settings subset needed for rewriteImageTags */
+export type ImageRewriteSettings = Pick<
+  OptimizationSettings['images'],
+  | 'convertToWebp'
+  | 'convertToAvif'
+  | 'keepOriginalAsFallback'
+  | 'generateSrcset'
+  | 'breakpoints'
+  | 'lazyLoadEnabled'
+  | 'lazyLoadMargin'
+  | 'lcpDetection'
+  | 'lcpImageSelector'
+  | 'lcpImageFetchPriority'
+>;
+
+const DEFAULT_IMAGE_REWRITE: ImageRewriteSettings = {
+  convertToWebp: true,
+  convertToAvif: false,
+  keepOriginalAsFallback: true,
+  generateSrcset: true,
+  breakpoints: [320, 640, 768, 1024, 1280, 1920],
+  lazyLoadEnabled: true,
+  lazyLoadMargin: 200,
+  lcpDetection: 'auto',
+  lcpImageFetchPriority: true,
+};
+
 /**
  * Rewrite <img> tags in HTML:
- * - Wrap in <picture> with AVIF/WebP sources + responsive srcset
- * - Add width/height attributes for CLS prevention
- * - Add loading="lazy" / decoding="async" (except LCP candidate)
- * - LCP candidate gets fetchpriority="high" + loading="eager"
+ * - Wrap in <picture> with AVIF/WebP sources + responsive srcset (per settings)
+ * - Add loading="lazy" / decoding="async" when lazyLoadEnabled
+ * - LCP candidate gets fetchpriority="high" + loading="eager" when lcpImageFetchPriority
  */
-export function rewriteImageTags(html: string, workDir: string): string {
+export function rewriteImageTags(
+  html: string,
+  workDir: string,
+  settings?: OptimizationSettings
+): string {
+  const imgs = settings?.images;
+  const opts: ImageRewriteSettings = imgs
+    ? {
+        convertToWebp: imgs.convertToWebp ?? true,
+        convertToAvif: imgs.convertToAvif ?? false,
+        keepOriginalAsFallback: imgs.keepOriginalAsFallback ?? true,
+        generateSrcset: imgs.generateSrcset ?? true,
+        breakpoints: imgs.breakpoints ?? DEFAULT_RESPONSIVE_WIDTHS,
+        lazyLoadEnabled: imgs.lazyLoadEnabled ?? true,
+        lazyLoadMargin: imgs.lazyLoadMargin ?? 200,
+        lcpDetection: imgs.lcpDetection ?? 'auto',
+        lcpImageSelector: imgs.lcpImageSelector,
+        lcpImageFetchPriority: imgs.lcpImageFetchPriority ?? true,
+      }
+    : DEFAULT_IMAGE_REWRITE;
+
   let imgIndex = 0;
-  let insideMain = false;
   let lcpFound = false;
 
-  // Track if we're inside <main>, <article>, or <header> for LCP detection
   html = html.replace(
     /<img\s([^>]*?)src=["']([^"']+)["']([^>]*?)>/gi,
     (match, before, src, after) => {
@@ -208,57 +278,83 @@ export function rewriteImageTags(html: string, workDir: string): string {
       const isRaster = ['.jpg', '.jpeg', '.png', '.webp', '.avif'].includes(ext);
 
       if (!isRaster) {
-        // For SVG/other, just add lazy loading
-        return addLoadingAttrs(match, before, after, imgIndex === 1 && !lcpFound);
+        const isLCP = opts.lcpImageFetchPriority && !lcpFound && imgIndex <= 3;
+        if (isLCP) lcpFound = true;
+        return addLoadingAttrs(
+          match, before, after,
+          opts.lazyLoadEnabled,
+          opts.lcpImageFetchPriority && isLCP
+        );
       }
 
-      // Determine LCP candidate: first large image
-      const isLCP = !lcpFound && imgIndex <= 3;
+      // LCP candidate: first few images (auto) or manual selector match
+      const hasManualLcp = opts.lcpDetection === 'manual' && opts.lcpImageSelector;
+      const isLCP = opts.lcpDetection !== 'disabled' && !lcpFound && (
+        hasManualLcp
+          ? false // Manual selector would need DOM/DOM path — not available in regex; treat as non-LCP for now
+          : imgIndex <= 3
+      );
       if (isLCP) lcpFound = true;
 
-      const loadingAttr = isLCP
-        ? 'loading="eager" fetchpriority="high"'
-        : 'loading="lazy" decoding="async"';
+      const useLazy = opts.lazyLoadEnabled && !(opts.lcpImageFetchPriority && isLCP);
+      const loadingAttr = useLazy
+        ? 'loading="lazy" decoding="async"'
+        : opts.lcpImageFetchPriority && isLCP
+          ? 'loading="eager" fetchpriority="high"'
+          : '';
 
-      // Clean existing loading/decoding/fetchpriority attributes
       const cleanBefore = before.replace(/\s*(loading|decoding|fetchpriority)=["'][^"']*["']/gi, '');
       const cleanAfter = after.replace(/\s*(loading|decoding|fetchpriority)=["'][^"']*["']/gi, '');
 
-      // Build srcset for responsive images
       const basePath = src.replace(/\.[^.]+$/, '');
       const avifSrc = `${basePath}.avif`;
       const webpSrc = `${basePath}.webp`;
 
-      // Build responsive srcset
-      const srcsetParts: string[] = [];
-      for (const w of DEFAULT_RESPONSIVE_WIDTHS) {
-        srcsetParts.push(`${basePath}-${w}w.webp ${w}w`);
+      const usePicture = opts.convertToWebp || opts.convertToAvif;
+      if (!usePicture) {
+        return addLoadingAttrs(match, before, after, opts.lazyLoadEnabled, opts.lcpImageFetchPriority && isLCP);
       }
-      srcsetParts.push(`${webpSrc} 1200w`); // Original as largest
 
-      const srcsetAttr = srcsetParts.length > 1
-        ? ` srcset="${srcsetParts.join(', ')}" sizes="(max-width: 400px) 400px, (max-width: 800px) 800px, 1200px"`
+      const fallbackSrc = opts.keepOriginalAsFallback ? src : (opts.convertToWebp ? webpSrc : src);
+
+      const avifSource = opts.convertToAvif
+        ? `<source srcset="${avifSrc}" type="image/avif">`
+        : '';
+      const webpSrcset = opts.generateSrcset && opts.convertToWebp
+        ? opts.breakpoints
+            .map((w) => `${basePath}-${w}w.webp ${w}w`)
+            .concat(`${webpSrc} 1920w`)
+            .join(', ')
+        : webpSrc;
+      const webpSource = opts.convertToWebp
+        ? `<source srcset="${webpSrcset}" type="image/webp">`
         : '';
 
-      return `<picture>` +
-        `<source srcset="${avifSrc}" type="image/avif">` +
-        `<source${srcsetAttr ? srcsetAttr : ` srcset="${webpSrc}"`} type="image/webp">` +
-        `<img ${cleanBefore}src="${src}"${cleanAfter} ${loadingAttr}>` +
-        `</picture>`;
+      const pictureContent = [avifSource, webpSource]
+        .filter(Boolean)
+        .join('');
+      const sizesAttr = opts.generateSrcset && opts.convertToWebp
+        ? ' sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 1200px"'
+        : '';
+
+      const imgTag = `<img ${cleanBefore}src="${fallbackSrc}"${cleanAfter}${loadingAttr ? ` ${loadingAttr}` : ''}>`;
+      return `<picture>${pictureContent}${imgTag}</picture>`;
     }
   );
 
   return html;
 }
 
-function addLoadingAttrs(match: string, before: string, after: string, isFirst: boolean): string {
-  const cleanBefore = before.replace(/\s*(loading|decoding|fetchpriority)=["'][^"']*["']/gi, '');
-  const cleanAfter = after.replace(/\s*(loading|decoding|fetchpriority)=["'][^"']*["']/gi, '');
-  const attrs = isFirst ? 'loading="eager"' : 'loading="lazy" decoding="async"';
-  return match.replace(
-    /<img\s([^>]*?)>/i,
-    `<img ${cleanBefore}${cleanAfter} ${attrs}>`
-  );
+function addLoadingAttrs(
+  match: string,
+  _before: string,
+  _after: string,
+  lazyEnabled: boolean,
+  isLCP: boolean
+): string {
+  const cleaned = match.replace(/\s*(loading|decoding|fetchpriority)=["'][^"']*["']/gi, '').replace(/\s+/g, ' ').trim();
+  const attrs = isLCP ? 'loading="eager" fetchpriority="high"' : lazyEnabled ? 'loading="lazy" decoding="async"' : '';
+  return attrs ? cleaned.replace(/>\s*$/, ` ${attrs}>`) : cleaned;
 }
 
 /**

@@ -137,4 +137,18 @@ export const api = {
     fetchJson<{ deleted: boolean }>(`/sites/${siteId}/asset-overrides/${overrideId}`, {
       method: 'DELETE',
     }),
+
+  // AI
+  getAIUsage: () =>
+    fetchJson<{
+      available: boolean;
+      currentMonth: string;
+      inputTokens: number;
+      outputTokens: number;
+      estimatedCost: number;
+      monthlyCap: number;
+      percentUsed: number;
+    }>('/ai/usage'),
+  getAIStatus: () =>
+    fetchJson<{ available: boolean; model: string }>('/ai/status'),
 };
