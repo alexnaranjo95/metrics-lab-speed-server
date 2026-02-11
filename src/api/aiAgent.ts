@@ -18,7 +18,14 @@ export const aiAgentRoutes: FastifyPluginAsync = async (app) => {
       const { siteId } = req.params;
 
       if (!isClaudeAvailable()) {
-        return reply.code(400).send({ error: 'ANTHROPIC_API_KEY not configured. Set it in environment variables.' });
+        // Include diagnostic info to help debug Coolify env var injection
+        const envKeys = Object.keys(process.env).filter(k => 
+          k.toLowerCase().includes('anthrop') || k.toLowerCase().includes('claude') || k.toLowerCase().includes('api')
+        );
+        return reply.code(400).send({ 
+          error: 'ANTHROPIC_API_KEY not configured. Set it in Coolify environment variables.',
+          hint: `Found ${envKeys.length} related env vars: ${envKeys.join(', ') || 'none'}. Check Coolify service > Environment Variables.`
+        });
       }
 
       const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });

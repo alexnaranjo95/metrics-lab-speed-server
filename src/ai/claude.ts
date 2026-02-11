@@ -7,10 +7,11 @@ let _client: Anthropic | null = null;
 
 function getClient(): Anthropic {
   if (!_client) {
-    if (!config.ANTHROPIC_API_KEY) {
+    const key = getAnthropicKey();
+    if (!key) {
       throw new Error('ANTHROPIC_API_KEY not configured');
     }
-    _client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
+    _client = new Anthropic({ apiKey: key });
   }
   return _client;
 }
@@ -70,7 +71,12 @@ export async function claudeJSON<T = any>(
 }
 
 export function isClaudeAvailable(): boolean {
-  return !!config.ANTHROPIC_API_KEY;
+  // Check both config (loaded at startup) and process.env (in case Coolify injects at runtime)
+  return !!(config.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY);
+}
+
+export function getAnthropicKey(): string | undefined {
+  return config.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
 }
 
 export { MODEL };
