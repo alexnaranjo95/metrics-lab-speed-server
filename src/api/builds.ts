@@ -168,6 +168,32 @@ export async function buildRoutes(app: FastifyInstance) {
     return { ...updated };
   });
 
+  // ── POST /api/sites/:siteId/builds/cancel-stale — Cancel stuck builds ──
+  app.post('/sites/:siteId/builds/cancel-stale', async (request, reply) => {
+    const { siteId } = request.params as { siteId: string };
+
+    const staleBuilds = await db.query.builds.findMany({
+      where: and(
+        eq(builds.siteId, siteId),
+        inArray(builds.status, ['queued', 'crawling', 'optimizing', 'deploying'])
+      ),
+    });
+
+    if (staleBuilds.length === 0) {
+      return reply.send({ cancelled: 0, message: 'No stale builds found' });
+    }
+
+    for (const build of staleBuilds) {
+      await db.update(builds).set({
+        status: 'failed',
+        errorMessage: 'Cancelled: stale build from previous deployment',
+        completedAt: new Date(),
+      }).where(eq(builds.id, build.id));
+    }
+
+    return reply.send({ cancelled: staleBuilds.length, buildIds: staleBuilds.map(b => b.id) });
+  });
+
   // ── GET /api/sites/:siteId/builds — List builds ──
   app.get('/sites/:siteId/builds', async (request, reply) => {
     const { siteId } = request.params as { siteId: string };

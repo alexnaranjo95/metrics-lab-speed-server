@@ -105,6 +105,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ scope }),
     }),
+  cancelStaleBuilds: (siteId: string) =>
+    fetchJson<{ cancelled: number; buildIds?: string[] }>(`/sites/${siteId}/builds/cancel-stale`, {
+      method: 'POST',
+    }),
 
   // Settings
   getSettings: (siteId: string) =>

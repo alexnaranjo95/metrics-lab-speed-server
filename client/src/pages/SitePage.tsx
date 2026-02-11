@@ -27,10 +27,24 @@ export function SitePage() {
   });
 
   const triggerMutation = useMutation({
-    mutationFn: () => api.triggerBuild(siteId!, 'full'),
+    mutationFn: async () => {
+      try {
+        return await api.triggerBuild(siteId!, 'full');
+      } catch (err: any) {
+        // If 409 (build in progress), auto-cancel stale builds and retry
+        if (err.message?.includes('already in progress')) {
+          await api.cancelStaleBuilds(siteId!);
+          return await api.triggerBuild(siteId!, 'full');
+        }
+        throw err;
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['builds', siteId] });
       queryClient.invalidateQueries({ queryKey: ['site-status', siteId] });
+    },
+    onError: (err: Error) => {
+      alert(err.message || 'Failed to trigger build');
     },
   });
 
