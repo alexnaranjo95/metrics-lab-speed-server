@@ -10,8 +10,6 @@ import { measurePerformance } from '../services/lighthouse.js';
 import { notifyDashboard } from '../services/dashboardNotifier.js';
 import { getCachedResolvedSettings } from '../shared/settingsMerge.js';
 import { buildEmitter } from '../events/buildEmitter.js';
-import { aiOptimizePage, isAIAvailable, getMonthlyUsage, trackTokenUsage, calculateCost } from '../services/aiOptimizer.js';
-import { config } from '../config.js';
 import type { OptimizationSettings } from '../shared/settingsSchema.js';
 
 async function updateBuildStatus(buildId: string, status: string) {
@@ -166,98 +164,10 @@ export async function runBuildPipeline(
       scriptsRemoved: optimizeResult.stats.scriptsRemoved,
     });
 
-    // ═══ PHASE 2.5: AI OPTIMIZATION (if enabled) ═══
-    if (resolvedSettings.ai.enabled && isAIAvailable()) {
-      buildEmitter.emitPhase(buildId, 'ai');
-
-      // Check monthly budget
-      const monthlyUsage = await getMonthlyUsage();
-      const monthlyCap = resolvedSettings.ai.monthlyCostCap;
-
-      if (monthlyUsage.estimatedCost >= monthlyCap) {
-        buildEmitter.log(buildId, 'ai', 'warn', `Monthly AI cost cap reached ($${monthlyUsage.estimatedCost.toFixed(2)}/$${monthlyCap})`);
-      } else {
-        const modelName = resolvedSettings.ai.model;
-        buildEmitter.log(buildId, 'ai', 'info', `AI optimization enabled — model: ${modelName}`);
-        buildEmitter.log(buildId, 'ai', 'info', `Monthly usage: $${monthlyUsage.estimatedCost.toFixed(2)} / $${monthlyCap} cap`);
-
-        const outputDir = path.join(workDir, 'output');
-        let buildTokensUsed = 0;
-        let pagesOptimized = 0;
-
-        for (const page of optimizeResult.pages) {
-          // Check per-build token budget
-          if (buildTokensUsed >= resolvedSettings.ai.perBuildTokenBudget) {
-            buildEmitter.log(buildId, 'ai', 'warn', 'Build token budget exceeded, skipping remaining pages');
-            break;
-          }
-
-          try {
-            const htmlFilename = page.path === '/'
-              ? 'index.html'
-              : `${page.path.slice(1).replace(/\/$/, '')}/index.html`;
-            const htmlPath = path.join(outputDir, htmlFilename);
-
-            let html: string;
-            try {
-              html = await fs.readFile(htmlPath, 'utf-8');
-            } catch {
-              continue; // File may not exist
-            }
-
-            buildEmitter.log(buildId, 'ai', 'info', `Analyzing: ${page.path}`);
-
-            const result = await aiOptimizePage(html, {
-              model: modelName,
-              maxTokens: resolvedSettings.ai.perPageTokenLimit,
-              features: {
-                altText: resolvedSettings.ai.features.altText,
-                metaDescriptions: resolvedSettings.ai.features.metaDescriptions,
-                structuredData: resolvedSettings.ai.features.structuredData,
-                accessibilityImprovements: resolvedSettings.ai.features.accessibilityImprovements,
-                contentOptimization: resolvedSettings.ai.features.contentOptimization,
-              },
-              customInstructions: resolvedSettings.ai.customInstructions,
-              pageUrl: page.path,
-            });
-
-            // Track tokens
-            const pageTokens = result.tokenUsage.input + result.tokenUsage.output;
-            buildTokensUsed += pageTokens;
-            await trackTokenUsage(result.tokenUsage.input, result.tokenUsage.output);
-
-            if (result.changes.length > 0) {
-              // Safety: reject if size changed drastically (already checked in service, but double-check)
-              const sizeDiff = Math.abs(result.optimizedHtml.length - html.length) / html.length;
-              if (sizeDiff > 0.5) {
-                buildEmitter.log(buildId, 'ai', 'warn', `Skipping ${page.path} — output size differs by ${(sizeDiff * 100).toFixed(0)}%`);
-                continue;
-              }
-
-              await fs.writeFile(htmlPath, result.optimizedHtml, 'utf-8');
-              pagesOptimized++;
-
-              for (const change of result.changes) {
-                buildEmitter.log(buildId, 'ai', 'info', `[${change.impact}] ${change.description}`);
-              }
-            } else {
-              buildEmitter.log(buildId, 'ai', 'info', `No additional optimizations for ${page.path}`);
-            }
-          } catch (err) {
-            buildEmitter.log(buildId, 'ai', 'error', `Failed for ${page.path}: ${(err as Error).message}`);
-            // Continue — never crash the build
-          }
-        }
-
-        const totalCost = calculateCost(
-          resolvedSettings.ai.model === 'claude-3-5-sonnet' ? 'claude-sonnet-4-20250514' : 'claude-sonnet-4-20250514',
-          buildTokensUsed, 0
-        );
-        buildEmitter.log(buildId, 'ai', 'info', `AI optimization complete. ${pagesOptimized} pages optimized, ${buildTokensUsed} tokens used`);
-      }
-    } else if (resolvedSettings.ai.enabled && !isAIAvailable()) {
-      buildEmitter.log(buildId, 'ai', 'warn', 'AI optimization enabled but no ANTHROPIC_API_KEY set — skipping');
-    }
+    // ═══ PHASE 2.5: AI OPTIMIZATION ═══
+    // Note: The full AI agent (src/ai/agent.ts) handles autonomous optimization.
+    // The per-build AI step is now handled entirely by the agent system.
+    // The legacy per-page AI step has been removed — use POST /api/sites/:siteId/ai/optimize instead.
 
     // ═══ PHASE 3: DEPLOY ═══
     buildEmitter.emitPhase(buildId, 'deploy');

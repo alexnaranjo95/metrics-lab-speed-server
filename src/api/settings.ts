@@ -5,7 +5,10 @@ import { sites, assetOverrides, settingsHistory } from '../db/schema.js';
 import { validateSettingsOverride, APP_DEFAULTS } from '../shared/settingsSchema.js';
 import { resolveSettingsFromData, diffSettings, matchUrlPattern, invalidateSettingsCache } from '../shared/settingsMerge.js';
 import { requireMasterKey } from '../middleware/auth.js';
-import { isAIAvailable, getMonthlyUsage } from '../services/aiOptimizer.js';
+import { isClaudeAvailable } from '../ai/claude.js';
+import { getMonthlyUsage } from '../services/aiOptimizer.js';
+
+const isAIAvailable = isClaudeAvailable;
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
 
@@ -17,7 +20,6 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       const usage = await getMonthlyUsage();
       const now = new Date();
       const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const monthlyCap = APP_DEFAULTS.ai.monthlyCostCap;
 
       return reply.send({
         available: isAIAvailable(),
@@ -25,8 +27,6 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         estimatedCost: Math.round(usage.estimatedCost * 100) / 100,
-        monthlyCap,
-        percentUsed: monthlyCap > 0 ? Math.round((usage.estimatedCost / monthlyCap) * 1000) / 10 : 0,
       });
     }
   );
@@ -38,7 +38,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     async (_req, reply) => {
       return reply.send({
         available: isAIAvailable(),
-        model: APP_DEFAULTS.ai.model,
+        model: 'claude-opus-4-20250514',
       });
     }
   );

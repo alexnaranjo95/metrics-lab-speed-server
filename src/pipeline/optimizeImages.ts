@@ -90,7 +90,7 @@ export async function optimizeImage(
       try {
         let pipeline = sharp(inputBuffer)
           .resize({ width: Math.min(srcWidth, MAX_WIDTH), withoutEnlargement: true });
-        if (stripMetadata) pipeline = pipeline.withMetadata(false);
+        if (stripMetadata) pipeline = pipeline.withMetadata({});
         const webpBuffer = await pipeline
           .webp({ quality: WEBP_QUALITY, effort: WEBP_EFFORT })
           .toBuffer();
@@ -105,7 +105,7 @@ export async function optimizeImage(
       try {
         let pipeline = sharp(inputBuffer)
           .resize({ width: Math.min(srcWidth, MAX_WIDTH), withoutEnlargement: true });
-        if (stripMetadata) pipeline = pipeline.withMetadata(false);
+        if (stripMetadata) pipeline = pipeline.withMetadata({});
         const avifBuffer = await pipeline
           .avif({ quality: AVIF_QUALITY, effort: AVIF_EFFORT })
           .toBuffer();
@@ -122,7 +122,7 @@ export async function optimizeImage(
         try {
           let pipeline = sharp(inputBuffer)
             .resize({ width: w, withoutEnlargement: true });
-          if (stripMetadata) pipeline = pipeline.withMetadata(false);
+          if (stripMetadata) pipeline = pipeline.withMetadata({});
           const resizedBuffer = await pipeline
             .webp({ quality: WEBP_QUALITY, effort: WEBP_EFFORT })
             .toBuffer();
@@ -157,7 +157,7 @@ interface FormatOptions {
 
 async function optimizeByFormat(input: Buffer, ext: string, srcWidth: number, opts: FormatOptions): Promise<Buffer> {
   let pipeline = sharp(input).resize({ width: Math.min(srcWidth, opts.maxWidth), withoutEnlargement: true });
-  if (opts.stripMetadata) pipeline = pipeline.withMetadata(false);
+  if (opts.stripMetadata) pipeline = pipeline.withMetadata({});
 
   switch (ext) {
     case '.jpg':
