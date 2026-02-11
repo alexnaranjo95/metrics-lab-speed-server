@@ -11,10 +11,12 @@ export function BuildHistoryPage() {
   const { siteId } = useParams<{ siteId: string }>();
   const queryClient = useQueryClient();
 
+  const hasKey = !!localStorage.getItem('apiKey');
+
   const { data: siteData } = useQuery({
     queryKey: ['site', siteId],
     queryFn: () => api.getSite(siteId!),
-    enabled: !!siteId,
+    enabled: !!siteId && hasKey,
   });
 
   const [pollEnabled, setPollEnabled] = useState(true);
@@ -29,7 +31,7 @@ export function BuildHistoryPage() {
       else setPollEnabled(true);
       return result;
     },
-    enabled: !!siteId,
+    enabled: !!siteId && hasKey,
     refetchInterval: pollEnabled ? 5000 : false,
   });
 

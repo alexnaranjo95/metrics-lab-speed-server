@@ -9,17 +9,19 @@ export function SitePage() {
   const { siteId } = useParams<{ siteId: string }>();
   const queryClient = useQueryClient();
 
+  const hasKey = !!localStorage.getItem('apiKey');
+
   const { data: statusData, isLoading: statusLoading } = useQuery({
     queryKey: ['site-status', siteId],
     queryFn: () => api.getSiteStatus(siteId!),
-    enabled: !!siteId,
+    enabled: !!siteId && hasKey,
     refetchInterval: 5000,
   });
 
   const { data: buildsData } = useQuery({
     queryKey: ['builds', siteId],
     queryFn: () => api.getBuilds(siteId!, 10),
-    enabled: !!siteId,
+    enabled: !!siteId && hasKey,
     refetchInterval: 10000,
   });
 

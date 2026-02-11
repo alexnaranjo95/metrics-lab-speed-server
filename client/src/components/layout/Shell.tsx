@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { Link, Outlet, useLocation, useParams } from 'react-router-dom';
-import { Zap, ChevronRight } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Zap, ChevronRight, LogIn } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export function Shell() {
   const location = useLocation();
@@ -76,13 +79,47 @@ function buildBreadcrumbs(pathname: string, params: Record<string, string | unde
 }
 
 function ApiKeyInput() {
+  const [key, setKey] = useState(localStorage.getItem('apiKey') || '');
+  const queryClient = useQueryClient();
+  const hasKey = !!localStorage.getItem('apiKey');
+
+  const handleConnect = () => {
+    localStorage.setItem('apiKey', key);
+    // Invalidate all cached queries so they re-fetch with the new key
+    queryClient.invalidateQueries();
+  };
+
   return (
-    <input
-      type="password"
-      placeholder="API Key"
-      className="h-8 w-48 px-3 text-xs rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] placeholder:text-[hsl(var(--muted-foreground))]"
-      defaultValue={localStorage.getItem('apiKey') || ''}
-      onChange={(e) => localStorage.setItem('apiKey', e.target.value)}
-    />
+    <div className="flex items-center gap-2">
+      <input
+        type="password"
+        placeholder="Paste API Key..."
+        value={key}
+        onChange={(e) => {
+          setKey(e.target.value);
+          localStorage.setItem('apiKey', e.target.value);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleConnect();
+        }}
+        className="h-8 w-48 px-3 text-xs rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))] placeholder:text-[hsl(var(--muted-foreground))]"
+      />
+      <button
+        onClick={handleConnect}
+        disabled={!key}
+        className={cn(
+          'flex items-center gap-1.5 h-8 px-3 text-xs font-medium rounded-md transition-colors',
+          key
+            ? 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90'
+            : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] cursor-not-allowed'
+        )}
+      >
+        <LogIn className="h-3 w-3" />
+        Connect
+      </button>
+      {hasKey && (
+        <span className="w-2 h-2 rounded-full bg-[hsl(var(--success))]" title="API key set" />
+      )}
+    </div>
   );
 }

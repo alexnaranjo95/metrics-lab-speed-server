@@ -15,6 +15,7 @@ export function DashboardPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['sites'],
     queryFn: () => api.listSites(),
+    enabled: !!localStorage.getItem('apiKey'),
     refetchInterval: 10000,
   });
 

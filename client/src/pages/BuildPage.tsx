@@ -32,7 +32,7 @@ export function BuildPage() {
       }
       return data;
     },
-    enabled: !!siteId && !!buildId,
+    enabled: !!siteId && !!buildId && !!localStorage.getItem('apiKey'),
     refetchInterval: pollEnabled ? 3000 : false,
   });
 
