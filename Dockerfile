@@ -12,7 +12,7 @@ FROM node:20-slim AS server-builder
 
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN npm install
 COPY . .
 RUN npm run build
 
@@ -28,7 +28,7 @@ RUN npx playwright install chromium
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # Copy compiled JS from server builder
 COPY --from=server-builder /app/dist ./dist
