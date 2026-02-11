@@ -11,21 +11,23 @@ export interface JsOptimizeResult {
   newPath?: string;
 }
 
-/**
- * Build the dead script patterns from settings.
- */
+/** Dead script filename patterns — when matched, file is unlinked (HTML tag removal is in optimizeHtml). */
 function getDeadScriptPatterns(settings?: OptimizationSettings): string[] {
   const patterns: string[] = [];
   const r = settings?.js.removeScripts;
-  if (!r || r.wpEmoji) patterns.push('wp-emoji-release.min.js');
-  if (!r || r.jqueryMigrate) patterns.push('jquery-migrate.min.js');
-  if (!r || r.wpEmbed) patterns.push('wp-embed.min.js');
-  if (!r || r.wpPolyfill) patterns.push('wp-polyfill.min.js');
-  if (!r || r.commentReply) patterns.push('comment-reply.min.js');
-  if (!r || r.hoverIntent) patterns.push('hoverintent-js.min.js');
-  if (!r || r.adminBar) patterns.push('admin-bar.js');
-  // Always remove cart fragments
-  patterns.push('cart-fragments.min.js');
+  if (!r || r.wpEmoji) patterns.push('wp-emoji-release', 'twemoji.min.js');
+  if (!r || r.wpEmbed) patterns.push('wp-embed');
+  if (!r || r.jqueryMigrate) patterns.push('jquery-migrate');
+  if (!r || r.commentReply) patterns.push('comment-reply');
+  if (!r || r.wpPolyfill) {
+    patterns.push('wp-polyfill', 'regenerator-runtime', 'wp-polyfill-inert', 'wp-polyfill-dom-rect', 'wp-polyfill-node-contains', 'wp-polyfill-element-closest', 'wp-polyfill-formdata', 'wp-polyfill-url', 'wp-polyfill-object-fit');
+  }
+  if (!r || r.hoverIntent) patterns.push('hoverintent', 'hoverIntent');
+  if (!r || r.adminBar) patterns.push('admin-bar');
+  if (!r || r.gutenbergBlocks) {
+    patterns.push('blocks.min.js', 'element.min.js', 'hooks.min.js', 'i18n.min.js', 'dom-ready.min.js', 'wp-block-editor', 'wp-edit-blocks');
+  }
+  patterns.push('cart-fragments');
   return patterns;
 }
 
@@ -49,7 +51,6 @@ export async function optimizeJsFile(
   const originalBytes = Buffer.byteLength(jsContent, 'utf-8');
   const filename = path.basename(jsPath);
 
-  // Check if this is a known dead script
   const deadPatterns = getDeadScriptPatterns(settings);
   const isDead = deadPatterns.some(pattern => filename.includes(pattern));
   if (isDead) {
@@ -58,14 +59,25 @@ export async function optimizeJsFile(
     return { originalBytes, optimizedBytes: 0, removed: true };
   }
 
-  // Check jQuery removal setting
-  if (settings?.js.removeJquery && filename.includes('jquery') && !filename.includes('jquery-migrate')) {
+  if (settings?.js.removeJquery && /jquery(?!-migrate)/i.test(filename)) {
     await fs.unlink(jsPath).catch(() => {});
     console.log(`[js] Removed jQuery: ${jsRelativePath}`);
     return { originalBytes, optimizedBytes: 0, removed: true };
   }
 
-  // Terser minification
+  const minifyEnabled = settings?.js.minifyEnabled ?? true;
+  if (!minifyEnabled) {
+    const hash = hashContent(jsContent).slice(0, 8);
+    const ext = path.extname(jsPath);
+    const basename = path.basename(jsPath, ext);
+    const hashedFilename = `${basename}.${hash}${ext}`;
+    const hashedPath = path.join(path.dirname(jsPath), hashedFilename);
+    await fs.writeFile(hashedPath, jsContent, 'utf-8');
+    if (hashedPath !== jsPath) await fs.unlink(jsPath).catch(() => {});
+    const hashedRelativePath = jsRelativePath.replace(path.basename(jsRelativePath), hashedFilename);
+    return { originalBytes, optimizedBytes: originalBytes, removed: false, newPath: hashedRelativePath };
+  }
+
   try {
     const result = await minify(jsContent, {
       compress: {
@@ -73,11 +85,19 @@ export async function optimizeJsFile(
         dead_code: true,
         drop_console: settings?.js.dropConsole ?? true,
         drop_debugger: settings?.js.dropDebugger ?? true,
-        pure_getters: true,
-        unsafe_math: true,
+        conditionals: true,
+        evaluate: true,
+        booleans: true,
+        loops: true,
+        unused: true,
+        join_vars: true,
+        toplevel: false,
       },
-      mangle: { toplevel: true },
-      output: { comments: false },
+      mangle: {
+        toplevel: false,
+        reserved: ['jQuery', '$', 'wp', 'google', 'fbq', 'gtag', 'dataLayer', 'gtag', '__ga', '_gaq'],
+      },
+      output: { comments: false, ascii_only: true },
     });
 
     if (result.code) {
@@ -114,64 +134,65 @@ export function usesDocumentWrite(jsContent: string): boolean {
   return /document\.write\s*\(/.test(jsContent);
 }
 
+/** Scripts that must NOT be deferred (GTM, analytics, tracking). */
+const CRITICAL_SCRIPT_PATTERNS = /googletagmanager|google-analytics|gtag|gtm\.js|fbevents|fbq\.js|facebook\.net\/en_US\/fbevents|analytics\.js/i;
+
 /**
- * Add defer attribute to ALL <script src> tags in the entire document
- * that don't already have defer or async.
- * Skip scripts that use document.write.
+ * Apply loading strategy (defer/async/module) to script tags.
+ * Skips GTM, GA, FB Pixel, and scripts that already have a strategy.
  */
-export function addDeferToScripts(html: string): string {
+export function addDeferToScripts(html: string, settings?: OptimizationSettings): string {
+  const strategy = settings?.js.defaultLoadingStrategy ?? 'defer';
+  const removeJquery = settings?.js.removeJquery ?? false;
+
   return html.replace(
     /<script\s([^>]*?)src=["']([^"']*?)["']([^>]*?)>([\s\S]*?)<\/script>/gi,
     (match, before, src, after, content) => {
       const attrs = before + after;
-      // Skip if already has defer or async
       if (/\b(defer|async)\b/i.test(attrs)) return match;
-      // Skip if inline content uses document.write
+      if (attrs.includes('type="module"')) return match;
       if (content && usesDocumentWrite(content)) return match;
+      if (CRITICAL_SCRIPT_PATTERNS.test(src)) return match;
+      if (!removeJquery && /jquery(?!-migrate)\.(min\.)?js/i.test(src)) return match;
 
-      return `<script ${before}src="${src}"${after} defer>${content}</script>`;
+      const attr = strategy === 'module' ? ' type="module"' : strategy === 'async' ? ' async' : ' defer';
+      return `<script ${before}src="${src}"${after}${attr}>${content}</script>`;
     }
   );
 }
 
 /**
- * Move inline <script> blocks from <head> to end of <body>.
- * Keeps scripts that set critical CSS variables or are tiny config objects.
+ * Move scripts from <head> to end of <body>.
+ * NEVER moves: GTM, GA, FB Pixel, JSON-LD, scripts with data-no-move.
+ * Only runs when moveToBodyEnd is true.
  */
-export function moveHeadScriptsToBody(html: string): string {
+export function moveHeadScriptsToBody(html: string, settings?: OptimizationSettings): string {
+  if (!(settings?.js.moveToBodyEnd ?? true)) return html;
+
   const headMatch = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
   if (!headMatch) return html;
 
   const headContent = headMatch[1];
   const scriptsToMove: string[] = [];
 
-  // Find inline scripts in head (no src attribute)
   const updatedHead = headContent.replace(
-    /<script(?!\s[^>]*src=)([^>]*)>([\s\S]*?)<\/script>/gi,
+    /<script(\s[^>]*?)>([\s\S]*?)<\/script>/gi,
     (match, attrs, content) => {
-      // Keep tiny config scripts (< 200 chars) and JSON-LD in head
-      if (content.length < 200 || /application\/ld\+json/i.test(attrs)) {
-        return match;
-      }
-      // Keep scripts that define CSS custom properties
-      if (/--[\w-]+\s*:/i.test(content)) {
-        return match;
-      }
+      const src = attrs.match(/src=["']([^"']+)["']/i)?.[1] || '';
+      if (attrs.includes('data-no-move') || attrs.includes('data-cfasync="false"')) return match;
+      if (/application\/ld\+json/i.test(attrs)) return match;
+      if (CRITICAL_SCRIPT_PATTERNS.test(src) || CRITICAL_SCRIPT_PATTERNS.test(content)) return match;
+      if (/googletagmanager|gtag\(|dataLayer|fbq\(|_fbq/.test(content)) return match;
+      if (content.length < 200 || /--[\w-]+\s*:/i.test(content)) return match;
       scriptsToMove.push(match);
-      return ''; // Remove from head
+      return '';
     }
   );
 
   if (scriptsToMove.length === 0) return html;
 
-  // Replace head
   html = html.replace(headMatch[0], `<head>${updatedHead}</head>`);
-
-  // Append scripts before </body>
-  const scriptsBlock = scriptsToMove.join('\n');
-  html = html.replace('</body>', `${scriptsBlock}\n</body>`);
-
-  console.log(`[js] Moved ${scriptsToMove.length} inline scripts from <head> to end of <body>`);
+  html = html.replace('</body>', `${scriptsToMove.join('\n')}\n</body>`);
   return html;
 }
 

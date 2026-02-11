@@ -20,13 +20,13 @@ export async function optimizeFonts(
   workDir: string,
   settings?: OptimizationSettings
 ): Promise<{ html: string; result: FontOptimizeResult }> {
+  const emptyResult = (): { html: string; result: FontOptimizeResult } => ({
+    html,
+    result: { fontsDownloaded: 0, fontFaceRules: '', preloadTags: [], removedGoogleFontLinks: 0 },
+  });
+  if (settings?.fonts.enabled === false) return emptyResult();
   // Check if self-hosting is enabled
-  if (settings?.fonts.selfHostGoogleFonts === false) {
-    return {
-      html,
-      result: { fontsDownloaded: 0, fontFaceRules: '', preloadTags: [], removedGoogleFontLinks: 0 },
-    };
-  }
+  if (settings?.fonts.selfHostGoogleFonts === false) return emptyResult();
   const $ = cheerio.load(html);
   const googleFontLinks: Array<{ href: string; element: any }> = [];
 

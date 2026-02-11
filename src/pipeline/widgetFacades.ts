@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import type { OptimizationSettings } from '../shared/settingsSchema.js';
 
 export interface WidgetFacadeResult {
   html: string;
@@ -131,8 +132,9 @@ function generateChatFacade(widget: ChatWidgetConfig, originalScriptContent: str
 
 /**
  * Detect and replace heavy third-party widgets with CSS-only facades.
+ * Respects video.googleMapsUseFacade and video.googleMapsStaticPreview for maps.
  */
-export async function replaceWidgetEmbeds(html: string): Promise<WidgetFacadeResult> {
+export async function replaceWidgetEmbeds(html: string, settings?: OptimizationSettings): Promise<WidgetFacadeResult> {
   const $ = cheerio.load(html);
   let facadesApplied = 0;
   let scriptsRemoved = 0;
@@ -241,22 +243,31 @@ export async function replaceWidgetEmbeds(html: string): Promise<WidgetFacadeRes
     facadesApplied++;
   }
 
-  // ── Google Maps ──
-  const mapIframes = $('iframe[src*="google.com/maps/embed"], iframe[src*="maps.google.com"]');
-  if (mapIframes.length > 0) {
-    mapIframes.each((_, iframe) => {
-      const src = $(iframe).attr('src') || '';
-      const width = $(iframe).attr('width') || '100%';
-      const height = $(iframe).attr('height') || '450';
+  // ── Google Maps (respect video.googleMapsUseFacade, video.googleMapsStaticPreview) ──
+  const googleMapsUseFacade = settings?.video?.googleMapsUseFacade !== false;
+  if (googleMapsUseFacade) {
+    const mapIframes = $('iframe[src*="google.com/maps/embed"], iframe[src*="maps.google.com"]');
+    const useStaticPreview = settings?.video?.googleMapsStaticPreview === true;
 
-      const facadeHtml = `
-<div class="mls-map-facade" data-original-src="${src}" style="position:relative;width:${width};height:${height}px;max-width:100%;background:#e8e8e8;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;overflow:hidden;">
-  <div style="text-align:center;padding:20px;">
+    if (mapIframes.length > 0) {
+      mapIframes.each((_, iframe) => {
+        const src = $(iframe).attr('src') || '';
+        const width = $(iframe).attr('width') || '100%';
+        const height = $(iframe).attr('height') || '450';
+
+        // googleMapsStaticPreview: map-style gradient; otherwise: generic icon
+        const placeholderHtml = useStaticPreview
+          ? `<div style="width:100%;height:100%;background:linear-gradient(135deg,#e8e8e8 0%,#c8d4e0 50%,#d0d8e4 100%);display:flex;align-items:center;justify-content:center;"><svg width="48" height="48" viewBox="0 0 24 24" fill="#5a6a7a"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg><span style="margin-left:8px;color:#5a6a7a;font-size:14px;">Click to load map</span></div>`
+          : `<div style="text-align:center;padding:20px;">
     <svg width="48" height="48" viewBox="0 0 24 24" fill="#666" xmlns="http://www.w3.org/2000/svg">
       <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
     </svg>
     <p style="margin:8px 0 0;color:#666;font-size:14px;">Click to load interactive map</p>
-  </div>
+  </div>`;
+
+        const facadeHtml = `
+<div class="mls-map-facade" data-original-src="${src.replace(/"/g, '&quot;')}" style="position:relative;width:${width};height:${height}px;max-width:100%;background:#e8e8e8;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+  ${placeholderHtml}
 </div>
 <script>
 document.querySelectorAll('.mls-map-facade').forEach(function(el) {
@@ -272,9 +283,10 @@ document.querySelectorAll('.mls-map-facade').forEach(function(el) {
 });
 </script>`.trim();
 
-      $(iframe).replaceWith(facadeHtml);
-      facadesApplied++;
-    });
+        $(iframe).replaceWith(facadeHtml);
+        facadesApplied++;
+      });
+    }
   }
 
   // ── Calendly ──

@@ -1,12 +1,13 @@
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, type Build } from '@/lib/api';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
 import { cn, formatBytes, formatDate } from '@/lib/utils';
-import { Play, ExternalLink, CheckCircle, XCircle, Clock, Loader2, Settings, Eye } from 'lucide-react';
+import { Play, ExternalLink, CheckCircle, XCircle, Clock, Loader2, Settings, Eye, Bot } from 'lucide-react';
 
 export function SitePage() {
   const { siteId } = useParams<{ siteId: string }>();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const hasKey = !!localStorage.getItem('apiKey');
@@ -66,19 +67,35 @@ export function SitePage() {
             )}
           </p>
         </div>
-        <button
-          onClick={() => triggerMutation.mutate()}
-          disabled={triggerMutation.isPending || latestBuild?.status === 'crawling' || latestBuild?.status === 'optimizing' || latestBuild?.status === 'deploying'}
-          className={cn(
-            'flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors',
-            triggerMutation.isPending
-              ? 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]'
-              : 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90'
-          )}
-        >
-          {triggerMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-          Trigger Build
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={async () => {
+              try {
+                await api.startAIOptimize(siteId!);
+                navigate(`/sites/${siteId}/ai`);
+              } catch (err: any) {
+                alert(err.message);
+              }
+            }}
+            className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-purple-600 text-white hover:bg-purple-700 transition-colors"
+          >
+            <Bot className="h-4 w-4" />
+            AI Optimize
+          </button>
+          <button
+            onClick={() => triggerMutation.mutate()}
+            disabled={triggerMutation.isPending || latestBuild?.status === 'crawling' || latestBuild?.status === 'optimizing' || latestBuild?.status === 'deploying'}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors',
+              triggerMutation.isPending
+                ? 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]'
+                : 'bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90'
+            )}
+          >
+            {triggerMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            Trigger Build
+          </button>
+        </div>
       </div>
 
       {/* Stats */}

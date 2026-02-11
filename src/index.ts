@@ -13,7 +13,9 @@ import { webhookRoutes } from './api/webhooks.js';
 import { settingsRoutes } from './api/settings.js';
 import { websocketRoutes } from './api/websocket.js';
 import { buildLogRoutes } from './api/buildLogs.js';
+import { aiAgentRoutes } from './api/aiAgent.js';
 import { buildWorker } from './queue/buildWorker.js';
+import { agentWorker } from './queue/agentWorker.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -107,6 +109,7 @@ async function start() {
 
   // Register API routes
   await app.register(settingsRoutes, { prefix: '/api' });
+  await app.register(aiAgentRoutes, { prefix: '/api' });
   await app.register(siteRoutes, { prefix: '/api' });
   await app.register(buildRoutes, { prefix: '/api' });
   await app.register(buildLogRoutes, { prefix: '/api' });
@@ -131,6 +134,7 @@ async function start() {
   const shutdown = async () => {
     app.log.info('Shutting down...');
     await buildWorker.close();
+    await agentWorker.close();
     await app.close();
     process.exit(0);
   };

@@ -151,4 +151,14 @@ export const api = {
     }>('/ai/usage'),
   getAIStatus: () =>
     fetchJson<{ available: boolean; model: string }>('/ai/status'),
+
+  // AI Agent
+  startAIOptimize: (siteId: string) =>
+    fetchJson<{ message: string; jobId: string; siteId: string }>(`/sites/${siteId}/ai/optimize`, { method: 'POST' }),
+  getAgentStatus: (siteId: string) =>
+    fetchJson<{ running: boolean; runId?: string; phase?: string; iteration?: number; maxIterations?: number; logCount?: number; recentLogs?: Array<{ timestamp: string; message: string }> }>(`/sites/${siteId}/ai/status`),
+  getAgentReport: (siteId: string) =>
+    fetchJson<{ report: any }>(`/sites/${siteId}/ai/report`),
+  stopAgent: (siteId: string) =>
+    fetchJson<{ stopped: boolean }>(`/sites/${siteId}/ai/stop`, { method: 'POST' }),
 };

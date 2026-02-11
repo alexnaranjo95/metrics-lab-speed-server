@@ -306,11 +306,6 @@ const aiFeaturesSchema = z.object({
 
 const aiSettingsSchema = z.object({
   enabled: z.boolean().default(false),
-  model: z.enum(['claude-3-5-sonnet', 'claude-3-opus', 'claude-3-5-haiku']).default('claude-3-5-sonnet'),
-  perBuildTokenBudget: z.number().default(100000),
-  perPageTokenLimit: z.number().default(10000),
-  monthlyCostCap: z.number().default(50),
-  autoPauseOnBudget: z.boolean().default(true),
   features: aiFeaturesSchema.default({
     altText: false, metaDescriptions: false, structuredData: false,
     accessibilityImprovements: false, contentOptimization: false,
@@ -431,8 +426,7 @@ export const settingsSchema = z.object({
     removeUnusedPreconnects: true, customPreconnectDomains: [], customDnsPrefetchDomains: [],
   }),
   ai: aiSettingsSchema.default({
-    enabled: false, model: 'claude-3-5-sonnet', perBuildTokenBudget: 100000, perPageTokenLimit: 10000,
-    monthlyCostCap: 50, autoPauseOnBudget: true,
+    enabled: false,
     features: { altText: false, metaDescriptions: false, structuredData: false, accessibilityImprovements: false, contentOptimization: false },
     customInstructions: '',
   }),

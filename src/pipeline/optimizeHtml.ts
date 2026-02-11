@@ -1,5 +1,4 @@
 import * as cheerio from 'cheerio';
-import { minify as htmlMinify } from 'html-minifier-terser';
 import { WP_CORE_SCRIPT_PATTERNS, WP_CORE_STYLE_PATTERNS, WP_META_SELECTORS, PLUGIN_SCRIPT_PATTERNS, PLUGIN_STYLE_PATTERNS, ANALYTICS_PATTERNS } from './wordpressBloat.js';
 import type { OptimizationSettings } from '../shared/settingsSchema.js';
 
@@ -10,51 +9,54 @@ export async function optimizeHtml(html: string, settings?: OptimizationSettings
   const $ = cheerio.load(html);
   const wpBloat = settings?.html.wpHeadBloat;
   const jsRemove = settings?.js.removeScripts;
+  const jsEnabled = settings?.js.enabled !== false;
 
-  // ── 1. WordPress Core Bloat Removal ──
-  removeWordPressCoreScripts($, jsRemove);
-  removeWordPressCoreStyles($, jsRemove);
+  if (jsEnabled) {
+    removeWordPressCoreScripts($, jsRemove);
+    removeWordPressCoreStyles($, jsRemove);
+    removeEmojiInlineStyle($, jsRemove);
+    removeOembedLinks($, jsRemove);
+    removeAdminBarHtmlAndMargin($, jsRemove);
+    if (jsRemove?.dashicons) {
+      const htmlStr = $.html();
+      if (/dashicons-|class="dashicons/i.test(htmlStr)) {
+        console.warn('[html] dashicons CSS removed but dashicon classes found in HTML — icons may be missing');
+      }
+    }
+    if (jsRemove?.wpBlockLibrary) removeBlockLibraryCss($);
+    if (jsRemove?.wpBlockLibraryTheme) $('link[href*="wp-block-library-theme"]').remove();
+    if (jsRemove?.classicThemeStyles) {
+      $('link[href*="classic-theme-styles"]').remove();
+      $('style#classic-theme-styles-inline-css').remove();
+    }
+    if (settings?.js.removeJquery && settings?.js.jqueryCompatibilityCheck) {
+      let jqueryUsage = false;
+      $('script').each((_, el) => {
+        const c = $(el).html() || '';
+        const src = $(el).attr('src') || '';
+        if (/\$\s*\(|jQuery\s*\(|\.ready\s*\(|\.on\s*\(/.test(c)) jqueryUsage = true;
+        if (/slick|owl\.carousel|fancybox|magnific|lightbox|select2|datepicker|flexslider|isotope|masonry/i.test(src)) jqueryUsage = true;
+      });
+      if (jqueryUsage) console.warn('[html] jQuery usage detected but removeJquery is ON — sliders, forms, interactive elements may break');
+    }
+  }
+
   removeWordPressMetaTags($, wpBloat);
   removeWordPressDuotoneFilters($);
-  removeGutenbergComments($);
-  if (!jsRemove || jsRemove.wpBlockLibrary) {
-    removeBlockLibraryCss($);
-  }
-
-  // ── 2. Plugin Bloat Removal (conditional) ──
   removePluginBloat($);
+  if (settings?.html.removeAnalytics !== false) removeAnalytics($, settings);
 
-  // ── 3. Analytics Removal ──
-  if (settings?.html.removeAnalytics !== false) {
-    removeAnalytics($);
-  }
-
-  // ── 4. HTML Minification with html-minifier-terser ──
-  let output = $.html();
-  output = await minifyHtml(output);
-
-  return output;
+  return $.html();
 }
 
 function removeWordPressCoreScripts($: cheerio.CheerioAPI, jsRemove?: OptimizationSettings['js']['removeScripts']) {
   for (const pattern of WP_CORE_SCRIPT_PATTERNS) {
-    // Check per-script settings
-    if (jsRemove) {
-      if (pattern.selector?.includes('wp-emoji') && !jsRemove.wpEmoji) continue;
-      if (pattern.selector?.includes('jquery-migrate') && !jsRemove.jqueryMigrate) continue;
-      if (pattern.selector?.includes('wp-embed') && !jsRemove.wpEmbed) continue;
-      if (pattern.selector?.includes('wp-polyfill') && !jsRemove.wpPolyfill) continue;
-      if (pattern.selector?.includes('comment-reply') && !jsRemove.commentReply) continue;
-    }
-    if (pattern.selector) {
-      $(pattern.selector).remove();
-    }
+    const key = pattern.settingKey as keyof NonNullable<typeof jsRemove>;
+    if (jsRemove && key && !jsRemove[key]) continue;
+    if (pattern.selector) $(pattern.selector).remove();
     if (pattern.contentMatch) {
       $('script').each((_, el) => {
-        const content = $(el).html() || '';
-        if (pattern.contentMatch!.test(content)) {
-          $(el).remove();
-        }
+        if (pattern.contentMatch!.test($(el).html() || '')) $(el).remove();
       });
     }
   }
@@ -62,12 +64,42 @@ function removeWordPressCoreScripts($: cheerio.CheerioAPI, jsRemove?: Optimizati
 
 function removeWordPressCoreStyles($: cheerio.CheerioAPI, jsRemove?: OptimizationSettings['js']['removeScripts']) {
   for (const pattern of WP_CORE_STYLE_PATTERNS) {
-    if (jsRemove) {
-      if (pattern.selector.includes('admin-bar') && !jsRemove.adminBar) continue;
-      if (pattern.selector.includes('dashicons') && !jsRemove.dashicons) continue;
-    }
+    const key = pattern.settingKey as keyof NonNullable<typeof jsRemove>;
+    if (jsRemove && key && !jsRemove[key]) continue;
     $(pattern.selector).remove();
   }
+}
+
+function removeEmojiInlineStyle($: cheerio.CheerioAPI, jsRemove?: OptimizationSettings['js']['removeScripts']) {
+  if (jsRemove && !jsRemove.wpEmoji) return;
+  $('style').each((_, el) => {
+    const css = $(el).html() || '';
+    if (/img\.wp-smiley|img\.emoji\s*\{/.test(css)) $(el).remove();
+  });
+  $('link[rel="dns-prefetch"][href*="s.w.org"]').remove();
+}
+
+function removeOembedLinks($: cheerio.CheerioAPI, jsRemove?: OptimizationSettings['js']['removeScripts']) {
+  if (jsRemove && !jsRemove.wpEmbed) return;
+  $('link[rel="alternate"][type*="oembed"]').remove();
+}
+
+function removeAdminBarHtmlAndMargin($: cheerio.CheerioAPI, jsRemove?: OptimizationSettings['js']['removeScripts']) {
+  if (jsRemove && !jsRemove.adminBar) return;
+  $('#wpadminbar').remove();
+  $('body').removeClass('admin-bar');
+  $('html').removeClass('admin-bar');
+  $('style#admin-bar-inline-css').remove();
+  $('style').each((_, el) => {
+    const css = $(el).html() || '';
+    if (!/margin-top:\s*(32|46)px\s*!important/.test(css)) return;
+    const cleaned = css
+      .replace(/html\s*\{\s*margin-top:\s*32px\s*!important\s*;?\s*\}/gi, '')
+      .replace(/html\s*\{\s*margin-top:\s*46px\s*!important\s*;?\s*\}/gi, '')
+      .replace(/@media[^{]+\{[^}]*margin-top:\s*46px\s*!important[^}]*\}/gi, '');
+    if (cleaned.trim().length < 30) $(el).remove();
+    else $(el).html(cleaned);
+  });
 }
 
 function removeWordPressMetaTags($: cheerio.CheerioAPI, wpBloat?: OptimizationSettings['html']['wpHeadBloat']) {
@@ -86,6 +118,28 @@ function removeWordPressMetaTags($: cheerio.CheerioAPI, wpBloat?: OptimizationSe
     const settingKey = selectorChecks[selector];
     if (wpBloat && settingKey && !wpBloat[settingKey]) continue;
     $(selector).remove();
+  }
+
+  // pingback
+  if (!wpBloat || wpBloat.pingback) {
+    $('link[rel="pingback"]').remove();
+  }
+
+  // commentsFeedLink
+  if (!wpBloat || wpBloat.commentsFeedLink) {
+    $('link').each((_, el) => {
+      const href = $(el).attr('href') || '';
+      const title = $(el).attr('title') || '';
+      if (href.includes('comments/feed') || title.toLowerCase().includes('comments feed')) {
+        $(el).remove();
+      }
+    });
+  }
+
+  // prevNextLinks
+  if (!wpBloat || wpBloat.prevNextLinks) {
+    $('link[rel="prev"]').remove();
+    $('link[rel="next"]').remove();
   }
 }
 
@@ -151,51 +205,38 @@ function removePluginBloat($: cheerio.CheerioAPI) {
   }
 }
 
-function removeAnalytics($: cheerio.CheerioAPI) {
+function removeAnalytics($: cheerio.CheerioAPI, settings?: OptimizationSettings) {
+  if (settings?.html.removeAnalytics === false) return;
+
+  const isMetricsLab = (s: string) => /metricslab|metrics-lab/i.test(s);
+
+  // External scripts — never remove Metrics Lab
   for (const pattern of ANALYTICS_PATTERNS.scripts) {
-    $(pattern).remove();
+    $(pattern).each((_, el) => {
+      const src = $(el).attr('src') || '';
+      if (!isMetricsLab(src)) $(el).remove();
+    });
   }
-  $('script').each((_, el) => {
+
+  // Inline scripts — never remove Metrics Lab
+  $('script:not([src])').each((_, el) => {
     const content = $(el).html() || '';
-    for (const inlinePattern of ANALYTICS_PATTERNS.inlinePatterns) {
-      if (inlinePattern.test(content)) {
-        $(el).remove();
-        return;
-      }
+    if (isMetricsLab(content)) return;
+    for (const p of ANALYTICS_PATTERNS.inlinePatterns) {
+      if (p.test(content)) { $(el).remove(); return; }
+    }
+    if (/window\.dataLayer\s*=\s*window\.dataLayer\s*\|\|\s*\[\]/.test(content) && /gtag\s*\(/.test(content)) {
+      $(el).remove();
+      return;
+    }
+    if (/hotjar\.com|hj\s*\(/.test(content) || /clarity\.ms|window\.clarity/.test(content)) {
+      $(el).remove();
     }
   });
-}
 
-/**
- * Robust HTML minification using html-minifier-terser.
- * Handles edge cases much better than regex-based minification.
- */
-async function minifyHtml(html: string): Promise<string> {
-  try {
-    const minified = await htmlMinify(html, {
-      collapseWhitespace: true,
-      removeComments: true,              // Removes ALL comments including Gutenberg <!-- wp:... -->
-      removeRedundantAttributes: true,    // Remove type="text/javascript" etc.
-      removeEmptyAttributes: true,
-      removeOptionalTags: false,          // Keep <html>, <head>, <body> tags
-      minifyCSS: true,                    // Minify inline CSS
-      minifyJS: true,                     // Minify inline JS
-      sortAttributes: true,
-      sortClassName: true,
-      collapseBooleanAttributes: true,    // checked="" → checked
-      decodeEntities: true,
-      processConditionalComments: true,
-      removeAttributeQuotes: false,       // Keep quotes for safety
-      removeScriptTypeAttributes: true,   // Remove type="text/javascript"
-      removeStyleLinkTypeAttributes: true, // Remove type="text/css"
-    });
-    return minified;
-  } catch (err) {
-    console.warn('[html] html-minifier-terser failed, using basic minification:', (err as Error).message);
-    // Fallback: basic regex minification
-    html = html.replace(/<!--[\s\S]*?-->/g, '');
-    html = html.replace(/>\s+</g, '><');
-    html = html.replace(/\s{2,}/g, ' ');
-    return html.trim();
-  }
+  // GTM noscript fallback
+  $('noscript').each((_, el) => {
+    const content = $(el).html() || '';
+    if (/googletagmanager/i.test(content)) $(el).remove();
+  });
 }

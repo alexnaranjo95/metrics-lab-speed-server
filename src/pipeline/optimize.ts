@@ -67,50 +67,101 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
   const cssRenames = new Map<string, string>(); // oldRelPath → newRelPath
   const jsRenames = new Map<string, string>();
 
-  // ═══ STEP 1: Optimize CSS assets (PurgeCSS + CleanCSS + font-display + hash) ═══
+  // ═══ STEP 1: Optimize CSS assets (PurgeCSS + cssnano + font-display + hash) ═══
   if (buildId) buildEmitter.emitPhase(buildId, 'css');
-  emit('css', 'info', `Optimizing ${[...assets.entries()].filter(([, a]) => a.type === 'css').length} CSS files...`);
-  console.log(`[optimize] Step 1: Optimizing CSS assets...`);
   const cssAssets = [...assets.entries()].filter(([, a]) => a.type === 'css');
   const allHtmlContent = pages.map(p => p.html);
 
-  for (const [url, asset] of cssAssets) {
-    try {
-      const result = await optimizeCssFile(asset.localPath, allHtmlContent, workDir, settings);
-      stats.css.originalBytes += result.originalBytes;
-      stats.css.optimizedBytes += result.optimizedBytes;
-      if (result.newPath && result.newPath !== asset.localPath) {
-        cssRenames.set(asset.localPath, result.newPath);
+  if (!settings.css.enabled) {
+    emit('css', 'info', 'CSS optimization disabled — skipping');
+    console.log(`[optimize] Step 1: CSS optimization disabled (css.enabled=false) — skipping`);
+  } else {
+    const c = settings.css;
+    const cssLog = `purge=${c.purge} (${c.purgeAggressiveness}), critical=${c.critical}, combine=${c.combineStylesheets}, minify=${c.minifyPreset}, font-display=${c.fontDisplay}`;
+    emit('css', 'info', `Using settings: ${cssLog}`);
+    console.log(`[optimize] CSS settings: ${cssLog}`);
+
+    if (c.combineStylesheets && cssAssets.length > 1) {
+      try {
+        let combined = '';
+        const combinedPaths: string[] = [];
+        for (const [, asset] of cssAssets) {
+          const fp = path.join(workDir, asset.localPath);
+          try {
+            combined += `/* Source: ${asset.localPath} */\n${await fs.readFile(fp, 'utf-8')}\n\n`;
+            combinedPaths.push(asset.localPath);
+          } catch { /* skip missing */ }
+        }
+        if (combinedPaths.length > 1) {
+          const combinedRel = path.join(path.dirname(cssAssets[0][1].localPath), 'combined.css');
+          const combinedFull = path.join(workDir, combinedRel);
+          await fs.mkdir(path.dirname(combinedFull), { recursive: true });
+          await fs.writeFile(combinedFull, combined, 'utf-8');
+          const optResult = await optimizeCssFile(combinedRel, allHtmlContent, workDir, settings);
+          const hashedRel = optResult.newPath!;
+          for (const lp of combinedPaths) cssRenames.set(lp, hashedRel);
+          stats.css.originalBytes = Buffer.byteLength(combined, 'utf-8');
+          stats.css.optimizedBytes = optResult.optimizedBytes;
+          for (const lp of combinedPaths) {
+            try { await fs.unlink(path.join(workDir, lp)); } catch { /* ignore */ }
+          }
+          emit('css', 'info', `Combined ${combinedPaths.length} stylesheets → ${hashedRel}`);
+          console.log(`[optimize] Combined ${combinedPaths.length} stylesheets → ${hashedRel}`);
+        }
+      } catch (err) {
+        emit('css', 'warn', `Combine failed, falling back to per-file: ${(err as Error).message}`);
+        console.warn(`[optimize] CSS combine failed:`, (err as Error).message);
       }
-      emit('css', 'info', `Optimized ${asset.localPath}`, { assetUrl: url, savings: { before: result.originalBytes, after: result.optimizedBytes } });
-    } catch (err) {
-      emit('css', 'warn', `CSS optimization failed for ${url}: ${(err as Error).message}`);
-      console.warn(`[optimize] CSS optimization failed for ${url}:`, (err as Error).message);
     }
+
+    if (cssRenames.size === 0) {
+      for (const [url, asset] of cssAssets) {
+        try {
+          const result = await optimizeCssFile(asset.localPath, allHtmlContent, workDir, settings);
+          stats.css.originalBytes += result.originalBytes;
+          stats.css.optimizedBytes += result.optimizedBytes;
+          if (result.newPath && result.newPath !== asset.localPath) {
+            cssRenames.set(asset.localPath, result.newPath);
+          }
+          emit('css', 'info', `Optimized ${asset.localPath}`, { assetUrl: url, savings: { before: result.originalBytes, after: result.optimizedBytes } });
+        } catch (err) {
+          emit('css', 'warn', `CSS optimization failed for ${url}: ${(err as Error).message}`);
+          console.warn(`[optimize] CSS optimization failed for ${url}:`, (err as Error).message);
+        }
+      }
+    }
+    console.log(`[optimize] CSS: ${stats.css.originalBytes} → ${stats.css.optimizedBytes} bytes`);
   }
-  console.log(`[optimize] CSS: ${stats.css.originalBytes} → ${stats.css.optimizedBytes} bytes`);
 
   // ═══ STEP 2: Optimize JS assets (Terser + hash) ═══
   if (buildId) buildEmitter.emitPhase(buildId, 'js');
-  emit('js', 'info', `Optimizing ${[...assets.entries()].filter(([, a]) => a.type === 'js').length} JS files...`);
-  console.log(`[optimize] Step 2: Optimizing JS assets...`);
   const jsAssets = [...assets.entries()].filter(([, a]) => a.type === 'js');
 
-  for (const [url, asset] of jsAssets) {
-    try {
-      const result = await optimizeJsFile(asset.localPath, workDir, settings);
-      stats.js.originalBytes += result.originalBytes;
-      stats.js.optimizedBytes += result.optimizedBytes;
-      if (result.removed) stats.scriptsRemoved++;
-      if (result.newPath && result.newPath !== asset.localPath) {
-        jsRenames.set(asset.localPath, result.newPath);
+  if (!settings.js.enabled) {
+    emit('js', 'info', 'JavaScript optimization disabled — skipping');
+    console.log(`[optimize] Step 2: JavaScript optimization disabled (js.enabled=false) — skipping`);
+  } else {
+    const j = settings.js;
+    const jsLog = `strategy=${j.defaultLoadingStrategy}, minify=${j.minifyEnabled}, moveToBody=${j.moveToBodyEnd}, combine=${j.combineScripts}, terser-passes=${j.terserPasses}`;
+    emit('js', 'info', `Using settings: ${jsLog}`);
+    console.log(`[optimize] JS settings: ${jsLog}`);
+
+    for (const [url, asset] of jsAssets) {
+      try {
+        const result = await optimizeJsFile(asset.localPath, workDir, settings);
+        stats.js.originalBytes += result.originalBytes;
+        stats.js.optimizedBytes += result.optimizedBytes;
+        if (result.removed) stats.scriptsRemoved++;
+        if (result.newPath && result.newPath !== asset.localPath) {
+          jsRenames.set(asset.localPath, result.newPath);
+        }
+        emit('js', 'info', result.removed ? `Removed ${asset.localPath}` : `Optimized ${asset.localPath}`, { assetUrl: url, savings: { before: result.originalBytes, after: result.optimizedBytes } });
+      } catch (err) {
+        console.warn(`[optimize] JS optimization failed for ${url}:`, (err as Error).message);
       }
-      emit('js', 'info', result.removed ? `Removed ${asset.localPath}` : `Optimized ${asset.localPath}`, { assetUrl: url, savings: { before: result.originalBytes, after: result.optimizedBytes } });
-    } catch (err) {
-      console.warn(`[optimize] JS optimization failed for ${url}:`, (err as Error).message);
     }
+    console.log(`[optimize] JS: ${stats.js.originalBytes} → ${stats.js.optimizedBytes} bytes`);
   }
-  console.log(`[optimize] JS: ${stats.js.originalBytes} → ${stats.js.optimizedBytes} bytes`);
 
   // ═══ STEP 3: Optimize image assets (Sharp + responsive + SVGO) ═══
   if (buildId) buildEmitter.emitPhase(buildId, 'images');
@@ -160,15 +211,24 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       console.error(`[optimize] CSS/JS reference update failed for ${page.path}:`, (err as Error).message);
     }
 
-    // 4b. WordPress bloat removal (Cheerio-based)
-    try {
-      html = await optimizeHtml(html, settings);
-    } catch (err) {
-      console.error(`[optimize] WP bloat removal failed for ${page.path}:`, (err as Error).message);
+    // 4b. WordPress bloat removal (Cheerio-based) — only when html.enabled
+    if (settings.html.enabled) {
+      try {
+        html = await optimizeHtml(html, settings);
+      } catch (err) {
+        console.error(`[optimize] WP bloat removal failed for ${page.path}:`, (err as Error).message);
+      }
+    } else if (i === 0) {
+      console.log(`[html] HTML optimization disabled — skipping`);
     }
 
     // 4c. Video facade replacement
     try {
+      if (i === 0) {
+        const v = settings.video;
+        emit('images', 'info', `Media: facades=${v.facadesEnabled}, poster=${v.posterQuality}, nocookie=${v.useNocookie}, preconnect=${v.preconnect}, lazy-iframes=${v.lazyLoadIframes}, maps=${v.googleMapsUseFacade}`);
+        console.log(`[optimize] Media settings: facades=${v.facadesEnabled}, poster=${v.posterQuality}, nocookie=${v.useNocookie}, preconnect=${v.preconnect}, lazy-iframes=${v.lazyLoadIframes}, maps=${v.googleMapsUseFacade}`);
+      }
       const videoResult = await replaceVideoEmbeds(html, workDir, settings);
       html = videoResult.html;
       stats.facades.total += videoResult.facadesApplied;
@@ -176,9 +236,9 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       console.error(`[optimize] Video facade replacement failed for ${page.path}:`, (err as Error).message);
     }
 
-    // 4d. Widget facade replacement
+    // 4d. Widget facade replacement (includes Google Maps — respects video.* settings)
     try {
-      const widgetResult = await replaceWidgetEmbeds(html);
+      const widgetResult = await replaceWidgetEmbeds(html, settings);
       html = widgetResult.html;
       stats.facades.total += widgetResult.facadesApplied;
       stats.scriptsRemoved += widgetResult.scriptsRemoved;
@@ -204,52 +264,52 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       }
     }
 
-    // 4g. Font optimization (self-host Google Fonts, preload)
-    try {
-      const fontResult = await optimizeFonts(html, workDir, settings);
-      html = fontResult.html;
-    } catch (err) {
-      console.error(`[optimize] Font optimization failed for ${page.path}:`, (err as Error).message);
+    // 4g. Font optimization (self-host Google Fonts, preload) — only when fonts.enabled
+    if (settings.fonts.enabled) {
+      try {
+        const fontResult = await optimizeFonts(html, workDir, settings);
+        html = fontResult.html;
+      } catch (err) {
+        console.error(`[optimize] Font optimization failed for ${page.path}:`, (err as Error).message);
+      }
     }
 
-    // 4h. Move inline scripts from <head> to end of <body>
-    try {
-      html = moveHeadScriptsToBody(html);
-    } catch (err) {
-      console.error(`[optimize] Script relocation failed for ${page.path}:`, (err as Error).message);
+    // 4h. Move scripts from <head> to end of <body> — only when js.enabled
+    if (settings.js.enabled) {
+      try {
+        html = moveHeadScriptsToBody(html, settings);
+      } catch (err) {
+        console.error(`[optimize] Script relocation failed for ${page.path}:`, (err as Error).message);
+      }
+
+      try {
+        html = addDeferToScripts(html, settings);
+      } catch (err) {
+        console.error(`[optimize] Script defer failed for ${page.path}:`, (err as Error).message);
+      }
     }
 
-    // 4i. Add defer to ALL <script src> tags
-    try {
-      html = addDeferToScripts(html);
-    } catch (err) {
-      console.error(`[optimize] Script defer failed for ${page.path}:`, (err as Error).message);
-    }
-
-    // 4j. Make stylesheets non-render-blocking (async loading)
-    try {
-      const cssFiles: Array<{ path: string; css: string }> = [];
-      for (const [, asset] of assets) {
-        if (asset.type === 'css') {
-          try {
-            const cssPath = path.join(workDir, asset.localPath);
-            const hashedPath = cssRenames.get(asset.localPath);
-            const actualPath = hashedPath ? path.join(workDir, hashedPath) : cssPath;
-            const css = await fs.readFile(actualPath, 'utf-8');
-            cssFiles.push({ path: asset.localPath, css });
-          } catch { /* file may have been renamed/removed */ }
+    // 4j. Make stylesheets non-render-blocking (async loading) — only when css.enabled
+    if (settings.css.enabled && settings.css.makeNonCriticalAsync) {
+      try {
+        const cssFiles: Array<{ path: string; css: string }> = [];
+        for (const [, asset] of assets) {
+          if (asset.type === 'css') {
+            try {
+              const cssPath = path.join(workDir, asset.localPath);
+              const hashedPath = cssRenames.get(asset.localPath);
+              const actualPath = hashedPath ? path.join(workDir, hashedPath) : cssPath;
+              const css = await fs.readFile(actualPath, 'utf-8');
+              cssFiles.push({ path: asset.localPath, css });
+            } catch { /* file may have been renamed/removed */ }
+          }
         }
-      }
-
-      if (cssFiles.length > 0) {
-        const critResult = await extractCriticalCss(html, cssFiles);
+        const critResult = await extractCriticalCss(html, cssFiles, settings.css);
         html = critResult.html;
-      } else {
-        html = makeStylesheetsAsync(html);
+      } catch (err) {
+        console.error(`[optimize] Async CSS conversion failed for ${page.path}:`, (err as Error).message);
+        try { html = makeStylesheetsAsync(html); } catch { /* last resort */ }
       }
-    } catch (err) {
-      console.error(`[optimize] Async CSS conversion failed for ${page.path}:`, (err as Error).message);
-      try { html = makeStylesheetsAsync(html); } catch { /* last resort */ }
     }
 
     // 4k. Resource hints (LCP preload, preconnect, cleanup)
@@ -259,28 +319,37 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       console.error(`[optimize] Resource hints injection failed for ${page.path}:`, (err as Error).message);
     }
 
-    // 4l. Final HTML minification (html-minifier-terser) — runs LAST
-    try {
-      const { minify: htmlMinify } = await import('html-minifier-terser');
-      html = await htmlMinify(html, {
-        collapseWhitespace: settings.html.safe.collapseWhitespace,
-        removeComments: settings.html.safe.removeComments,
-        removeRedundantAttributes: settings.html.safe.removeRedundantAttributes,
-        minifyCSS: settings.html.safe.minifyCSS,
-        minifyJS: settings.html.safe.minifyJS,
-        collapseBooleanAttributes: settings.html.safe.collapseBooleanAttributes,
-        removeScriptTypeAttributes: settings.html.safe.removeScriptTypeAttributes,
-        removeStyleLinkTypeAttributes: settings.html.safe.removeStyleLinkTypeAttributes,
-        decodeEntities: settings.html.safe.decodeEntities,
-        // Aggressive options
-        removeAttributeQuotes: settings.html.aggressive.removeAttributeQuotes,
-        removeOptionalTags: settings.html.aggressive.removeOptionalTags,
-        removeEmptyElements: settings.html.aggressive.removeEmptyElements,
-        sortAttributes: settings.html.aggressive.sortAttributes,
-        sortClassName: settings.html.aggressive.sortClassName,
-      });
-    } catch (err) {
-      console.error(`[optimize] Final HTML minification failed for ${page.path}:`, (err as Error).message);
+    // 4l. Final HTML minification (html-minifier-terser) — runs LAST, only when html.enabled
+    if (settings.html.enabled) {
+      try {
+        const a = settings.html.aggressive;
+        if (a.removeEmptyElements) console.warn('[html] WARNING: removeEmptyElements is ON. May remove intentional spacers, icon font placeholders (<i class="fa">), and CSS-only layout elements. Visual layout may break. Test thoroughly.');
+        if (a.removeTagWhitespace) console.warn('[html] WARNING: removeTagWhitespace is ON. Can break rendering in some browsers. Only enable if you have thoroughly tested the output.');
+
+        const { minify: htmlMinify } = await import('html-minifier-terser');
+        html = await htmlMinify(html, {
+          collapseWhitespace: settings.html.safe.collapseWhitespace,
+          removeComments: settings.html.safe.removeComments,
+          removeRedundantAttributes: settings.html.safe.removeRedundantAttributes,
+          useShortDoctype: settings.html.safe.useShortDoctype,
+          minifyCSS: settings.html.safe.minifyCSS,
+          minifyJS: settings.html.safe.minifyJS,
+          collapseBooleanAttributes: settings.html.safe.collapseBooleanAttributes,
+          removeScriptTypeAttributes: settings.html.safe.removeScriptTypeAttributes,
+          removeStyleLinkTypeAttributes: settings.html.safe.removeStyleLinkTypeAttributes,
+          decodeEntities: settings.html.safe.decodeEntities,
+          ignoreCustomComments: [/^\[if /],
+          // Aggressive options
+          removeAttributeQuotes: a.removeAttributeQuotes,
+          removeOptionalTags: a.removeOptionalTags,
+          removeEmptyElements: a.removeEmptyElements,
+          sortAttributes: a.sortAttributes,
+          sortClassName: a.sortClassName,
+          removeTagWhitespace: a.removeTagWhitespace,
+        });
+      } catch (err) {
+        console.error(`[optimize] Final HTML minification failed for ${page.path}:`, (err as Error).message);
+      }
     }
 
     const optimizedSize = Buffer.byteLength(html, 'utf-8');

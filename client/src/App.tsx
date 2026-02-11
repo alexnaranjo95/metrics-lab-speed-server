@@ -5,6 +5,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { SitePage } from './pages/SitePage';
 import { BuildHistoryPage } from './pages/BuildHistoryPage';
 import { BuildPage } from './pages/BuildPage';
+import { AgentPage } from './pages/AgentPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,6 +24,7 @@ export default function App() {
           <Route element={<Shell />}>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/sites/:siteId" element={<SitePage />} />
+            <Route path="/sites/:siteId/ai" element={<AgentPage />} />
             <Route path="/sites/:siteId/builds" element={<BuildHistoryPage />} />
             <Route path="/sites/:siteId/builds/:buildId" element={<BuildPage />} />
           </Route>

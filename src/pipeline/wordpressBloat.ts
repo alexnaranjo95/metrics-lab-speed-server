@@ -5,23 +5,39 @@
 export interface ScriptPattern {
   selector?: string;
   contentMatch?: RegExp;
+  settingKey?: string;
 }
 
-// ── WordPress Core Scripts to Remove ──
+// ── WordPress Core Scripts to Remove (per setting) ──
 export const WP_CORE_SCRIPT_PATTERNS: ScriptPattern[] = [
-  { selector: 'script[src*="wp-emoji-release.min.js"]' },
-  { selector: 'script[src*="jquery-migrate.min.js"]' },
-  { selector: 'script[src*="wp-embed.min.js"]' },
-  { selector: 'script[src*="wp-polyfill.min.js"]' },
-  { selector: 'script[src*="comment-reply.min.js"]' },
-  // Inline emoji detection script
-  { contentMatch: /window\._wpemojiSettings/ },
+  { selector: 'script[src*="wp-emoji"]', settingKey: 'wpEmoji' },
+  { selector: 'script[src*="twemoji"]', settingKey: 'wpEmoji' },
+  { contentMatch: /window\._wpemojiSettings|wp\.emoji/, settingKey: 'wpEmoji' },
+  { selector: 'script[src*="wp-embed"]', settingKey: 'wpEmbed' },
+  { contentMatch: /wp\.receiveEmbedMessage|window\._wpEmbedSettings/, settingKey: 'wpEmbed' },
+  { selector: 'script[src*="jquery-migrate"]', settingKey: 'jqueryMigrate' },
+  { selector: 'script[src*="comment-reply"]', settingKey: 'commentReply' },
+  { selector: 'script[src*="wp-polyfill"]', settingKey: 'wpPolyfill' },
+  { selector: 'script[src*="regenerator-runtime"]', settingKey: 'wpPolyfill' },
+  { selector: 'script[src*="hoverintent"]', settingKey: 'hoverIntent' },
+  { selector: 'script[src*="hoverIntent"]', settingKey: 'hoverIntent' },
+  { selector: 'script[src*="admin-bar"]', settingKey: 'adminBar' },
+  { selector: 'script[src*="blocks.min.js"]', settingKey: 'gutenbergBlocks' },
+  { selector: 'script[src*="element.min.js"]', settingKey: 'gutenbergBlocks' },
+  { selector: 'script[src*="wp-block-editor"]', settingKey: 'gutenbergBlocks' },
+  { selector: 'script[src*="wp-edit-blocks"]', settingKey: 'gutenbergBlocks' },
 ];
 
 // ── WordPress Core Styles to Remove ──
-export const WP_CORE_STYLE_PATTERNS = [
-  { selector: 'link[href*="admin-bar.min.css"]' },
-  { selector: 'link[href*="dashicons.min.css"]' },
+export const WP_CORE_STYLE_PATTERNS: Array<{ selector: string; contentMatch?: RegExp; settingKey?: string }> = [
+  { selector: 'link[href*="admin-bar"]', settingKey: 'adminBar' },
+  { selector: 'link[href*="dashicons"]', settingKey: 'dashicons' },
+  { selector: 'link[href*="wp-block-library/style"]', settingKey: 'wpBlockLibrary' },
+  { selector: 'link[href*="block-library/style"]', settingKey: 'wpBlockLibrary' },
+  { selector: 'link[href*="wp-block-library-theme"]', settingKey: 'wpBlockLibraryTheme' },
+  { selector: 'style#wp-block-library-inline-css', settingKey: 'wpBlockLibrary' },
+  { selector: 'style#classic-theme-styles-inline-css', settingKey: 'classicThemeStyles' },
+  { selector: 'link[href*="classic-theme-styles"]', settingKey: 'classicThemeStyles' },
 ];
 
 // ── WordPress Meta Tags / Link Elements to Remove ──
