@@ -31,105 +31,51 @@ export function AiBuildTab({ settings, defaults, diff, onChange }: Props) {
             <div className="flex items-center gap-2">
               <span className={cn('w-2.5 h-2.5 rounded-full', aiUsage.available ? 'bg-[hsl(var(--success))]' : 'bg-[hsl(var(--muted-foreground))]')} />
               <span className="text-sm font-medium">
-                {aiUsage.available ? 'Claude API Connected' : 'Claude API Not Configured'}
+                {aiUsage.available ? 'Claude Opus 4 Connected' : 'Claude API Not Configured'}
               </span>
             </div>
             {!aiUsage.available && (
               <span className="text-xs text-[hsl(var(--muted-foreground))]">
-                Set ANTHROPIC_API_KEY in environment variables
+                Set ANTHROPIC_API_KEY in Coolify environment variables
               </span>
             )}
           </div>
-          {aiUsage.available && (
-            <div>
-              <div className="flex items-center justify-between text-xs text-[hsl(var(--muted-foreground))] mb-1">
-                <span>Monthly usage: ${aiUsage.estimatedCost.toFixed(2)} / ${aiUsage.monthlyCap}</span>
-                <span>{aiUsage.percentUsed.toFixed(1)}%</span>
-              </div>
-              <div className="h-2 bg-[hsl(var(--muted))] rounded-full overflow-hidden">
-                <div
-                  className={cn('h-full rounded-full transition-all', aiUsage.percentUsed > 80 ? 'bg-[hsl(var(--warning))]' : 'bg-[hsl(var(--success))]')}
-                  style={{ width: `${Math.min(100, aiUsage.percentUsed)}%` }}
-                />
-              </div>
-              <div className="flex justify-between text-[10px] text-[hsl(var(--muted-foreground))] mt-1">
-                <span>{aiUsage.inputTokens.toLocaleString()} input + {aiUsage.outputTokens.toLocaleString()} output tokens</span>
-                <span>{aiUsage.currentMonth}</span>
-              </div>
+          {aiUsage.available && aiUsage.estimatedCost > 0 && (
+            <div className="text-xs text-[hsl(var(--muted-foreground))]">
+              Monthly usage: ${aiUsage.estimatedCost.toFixed(2)} ({aiUsage.inputTokens?.toLocaleString() || 0} input + {aiUsage.outputTokens?.toLocaleString() || 0} output tokens) -- {aiUsage.currentMonth}
             </div>
           )}
         </div>
       )}
 
-      <SettingCard title="AI Optimization" description="AI-powered content optimization using Anthropic's Claude API">
-        <SettingField label="Enable AI Optimization" description="Runs after standard optimization, before deployment" isOverridden={diff?.ai?.enabled}>
-          <Toggle checked={settings.ai.enabled} onChange={(v) => onChange('ai', { enabled: v })} />
-        </SettingField>
-        <SettingField label="Model" description="Sonnet ~$0.25/page. Opus ~$2.50/page. Haiku ~$0.05/page." isOverridden={diff?.ai?.model}>
-          <Select
-            value={settings.ai.model}
-            options={[
-              { value: 'claude-3-5-sonnet', label: 'Claude 3.5 Sonnet (recommended)' },
-              { value: 'claude-3-opus', label: 'Claude 3 Opus (highest quality)' },
-              { value: 'claude-3-5-haiku', label: 'Claude 3.5 Haiku (cheapest)' },
-            ]}
-            onChange={(v) => onChange('ai', { model: v })}
-          />
+      <SettingCard title="AI Optimization" description="Claude Opus 4 autonomous optimization agent. Use the 'AI Optimize' button on the site page to start.">
+        <SettingField label="Enable AI Features" description="Controls whether AI features (alt text, meta descriptions, etc.) are included during agent runs" isOverridden={diff?.ai?.enabled}>
+          <Toggle checked={settings.ai?.enabled ?? false} onChange={(v) => onChange('ai', { enabled: v })} />
         </SettingField>
       </SettingCard>
 
-      <SettingCard title="Cost Controls">
-        <SettingField label="Per-Build Token Budget" isOverridden={diff?.ai?.perBuildTokenBudget}>
-          <input
-            type="number"
-            value={settings.ai.perBuildTokenBudget}
-            onChange={(e) => onChange('ai', { perBuildTokenBudget: Number(e.target.value) })}
-            className="h-8 w-32 px-2 text-sm rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))]"
-          />
-        </SettingField>
-        <SettingField label="Per-Page Token Limit" isOverridden={diff?.ai?.perPageTokenLimit}>
-          <input
-            type="number"
-            value={settings.ai.perPageTokenLimit}
-            onChange={(e) => onChange('ai', { perPageTokenLimit: Number(e.target.value) })}
-            className="h-8 w-32 px-2 text-sm rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))]"
-          />
-        </SettingField>
-        <SettingField label="Monthly Cost Cap ($)" isOverridden={diff?.ai?.monthlyCostCap}>
-          <input
-            type="number"
-            value={settings.ai.monthlyCostCap}
-            onChange={(e) => onChange('ai', { monthlyCostCap: Number(e.target.value) })}
-            className="h-8 w-32 px-2 text-sm rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))]"
-          />
-        </SettingField>
-        <SettingField label="Auto-Pause on Budget" isOverridden={diff?.ai?.autoPauseOnBudget}>
-          <Toggle checked={settings.ai.autoPauseOnBudget} onChange={(v) => onChange('ai', { autoPauseOnBudget: v })} />
-        </SettingField>
-      </SettingCard>
-
-      <SettingCard title="AI Features" description="Enable individual AI-powered optimizations">
+      <SettingCard title="AI Features" description="Enable individual AI-powered optimizations during agent runs">
         <SettingField label="Alt Text Generation" description="Generate alt text for images missing it" isOverridden={diff?.ai?.features?.altText}>
-          <Toggle checked={settings.ai.features.altText} onChange={(v) => onChange('ai', { features: { altText: v } })} />
+          <Toggle checked={settings.ai?.features?.altText ?? false} onChange={(v) => onChange('ai', { features: { altText: v } })} />
         </SettingField>
         <SettingField label="Meta Descriptions" description="Generate/improve page meta descriptions" isOverridden={diff?.ai?.features?.metaDescriptions}>
-          <Toggle checked={settings.ai.features.metaDescriptions} onChange={(v) => onChange('ai', { features: { metaDescriptions: v } })} />
+          <Toggle checked={settings.ai?.features?.metaDescriptions ?? false} onChange={(v) => onChange('ai', { features: { metaDescriptions: v } })} />
         </SettingField>
         <SettingField label="Structured Data (JSON-LD)" description="Create schema.org structured data" isOverridden={diff?.ai?.features?.structuredData}>
-          <Toggle checked={settings.ai.features.structuredData} onChange={(v) => onChange('ai', { features: { structuredData: v } })} />
+          <Toggle checked={settings.ai?.features?.structuredData ?? false} onChange={(v) => onChange('ai', { features: { structuredData: v } })} />
         </SettingField>
         <SettingField label="Accessibility Improvements" description="Add ARIA labels and semantic HTML" isOverridden={diff?.ai?.features?.accessibilityImprovements}>
-          <Toggle checked={settings.ai.features.accessibilityImprovements} onChange={(v) => onChange('ai', { features: { accessibilityImprovements: v } })} />
+          <Toggle checked={settings.ai?.features?.accessibilityImprovements ?? false} onChange={(v) => onChange('ai', { features: { accessibilityImprovements: v } })} />
         </SettingField>
         <SettingField label="Content Optimization" description="Suggest content improvements for SEO" isOverridden={diff?.ai?.features?.contentOptimization}>
-          <Toggle checked={settings.ai.features.contentOptimization} onChange={(v) => onChange('ai', { features: { contentOptimization: v } })} />
+          <Toggle checked={settings.ai?.features?.contentOptimization ?? false} onChange={(v) => onChange('ai', { features: { contentOptimization: v } })} />
         </SettingField>
       </SettingCard>
 
       <SettingCard title="Custom Instructions" description="Appended to the AI system prompt for all operations">
         <div className="pt-2">
           <textarea
-            value={settings.ai.customInstructions}
+            value={settings.ai?.customInstructions ?? ''}
             onChange={(e) => onChange('ai', { customInstructions: e.target.value })}
             placeholder="e.g., Maintain brand voice. Optimize for local SEO in San Francisco."
             rows={3}
@@ -141,7 +87,7 @@ export function AiBuildTab({ settings, defaults, diff, onChange }: Props) {
       <SettingCard title="Build Schedule">
         <SettingField label="Schedule Mode" isOverridden={diff?.build?.scheduleMode}>
           <Select
-            value={settings.build.scheduleMode}
+            value={settings.build?.scheduleMode ?? 'manual'}
             options={[
               { value: 'manual', label: 'Manual trigger only' },
               { value: 'cron', label: 'Cron schedule' },
@@ -151,11 +97,11 @@ export function AiBuildTab({ settings, defaults, diff, onChange }: Props) {
             onChange={(v) => onChange('build', { scheduleMode: v })}
           />
         </SettingField>
-        {settings.build.scheduleMode === 'cron' && (
+        {settings.build?.scheduleMode === 'cron' && (
           <SettingField label="Cron Pattern" description="e.g., '0 3 * * *' for daily at 3 AM" isOverridden={diff?.build?.cronPattern}>
             <input
               type="text"
-              value={settings.build.cronPattern}
+              value={settings.build?.cronPattern ?? ''}
               onChange={(e) => onChange('build', { cronPattern: e.target.value })}
               placeholder="0 3 * * *"
               className="h-8 w-40 px-2 text-sm font-mono rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))]"
@@ -167,7 +113,7 @@ export function AiBuildTab({ settings, defaults, diff, onChange }: Props) {
       <SettingCard title="Build Scope">
         <SettingField label="Default Scope" isOverridden={diff?.build?.scope}>
           <Select
-            value={settings.build.scope}
+            value={settings.build?.scope ?? 'full'}
             options={[
               { value: 'full', label: 'Full (all pages)' },
               { value: 'homepage', label: 'Homepage only' },
@@ -177,25 +123,25 @@ export function AiBuildTab({ settings, defaults, diff, onChange }: Props) {
           />
         </SettingField>
         <SettingField label="Max Pages" description="Maximum pages to crawl per build" isOverridden={diff?.build?.maxPages}>
-          <Slider value={settings.build.maxPages} min={1} max={500} step={10} onChange={(v) => onChange('build', { maxPages: v })} />
+          <Slider value={settings.build?.maxPages ?? 100} min={1} max={500} step={10} onChange={(v) => onChange('build', { maxPages: v })} />
         </SettingField>
       </SettingCard>
 
       <SettingCard title="Build Configuration">
         <SettingField label="Page Load Timeout (seconds)" isOverridden={diff?.build?.pageLoadTimeout}>
-          <Slider value={settings.build.pageLoadTimeout} min={10} max={120} onChange={(v) => onChange('build', { pageLoadTimeout: v })} />
+          <Slider value={settings.build?.pageLoadTimeout ?? 30} min={10} max={120} onChange={(v) => onChange('build', { pageLoadTimeout: v })} />
         </SettingField>
         <SettingField label="Pipeline Timeout (minutes)" description="Max total build time before abort" isOverridden={diff?.build?.pipelineTimeout}>
-          <Slider value={settings.build.pipelineTimeout} min={5} max={60} onChange={(v) => onChange('build', { pipelineTimeout: v })} />
+          <Slider value={settings.build?.pipelineTimeout ?? 15} min={5} max={60} onChange={(v) => onChange('build', { pipelineTimeout: v })} />
         </SettingField>
         <SettingField label="Max Retries" isOverridden={diff?.build?.maxRetries}>
-          <Slider value={settings.build.maxRetries} min={0} max={10} onChange={(v) => onChange('build', { maxRetries: v })} />
+          <Slider value={settings.build?.maxRetries ?? 3} min={0} max={10} onChange={(v) => onChange('build', { maxRetries: v })} />
         </SettingField>
         <SettingField label="Max Concurrent Pages" isOverridden={diff?.build?.maxConcurrentPages}>
-          <Slider value={settings.build.maxConcurrentPages} min={1} max={10} onChange={(v) => onChange('build', { maxConcurrentPages: v })} />
+          <Slider value={settings.build?.maxConcurrentPages ?? 3} min={1} max={10} onChange={(v) => onChange('build', { maxConcurrentPages: v })} />
         </SettingField>
         <SettingField label="Auto-Deploy on Success" description="Automatically deploy to Cloudflare Pages when build succeeds" isOverridden={diff?.build?.autoDeployOnSuccess}>
-          <Toggle checked={settings.build.autoDeployOnSuccess} onChange={(v) => onChange('build', { autoDeployOnSuccess: v })} />
+          <Toggle checked={settings.build?.autoDeployOnSuccess ?? true} onChange={(v) => onChange('build', { autoDeployOnSuccess: v })} />
         </SettingField>
       </SettingCard>
     </div>

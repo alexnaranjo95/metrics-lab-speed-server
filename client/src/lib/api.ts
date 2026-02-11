@@ -146,8 +146,6 @@ export const api = {
       inputTokens: number;
       outputTokens: number;
       estimatedCost: number;
-      monthlyCap: number;
-      percentUsed: number;
     }>('/ai/usage'),
   getAIStatus: () =>
     fetchJson<{ available: boolean; model: string }>('/ai/status'),
