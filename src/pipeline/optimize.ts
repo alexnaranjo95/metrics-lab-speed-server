@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { CrawledPage, AssetInfo } from './crawl.js';
 import type { OptimizationSettings } from '../shared/settingsSchema.js';
+import { buildEmitter } from '../events/buildEmitter.js';
 import { optimizeHtml } from './optimizeHtml.js';
 import { optimizeCssFile, extractCriticalCss, updateCssReferences, makeStylesheetsAsync } from './optimizeCss.js';
 import { optimizeJsFile, addDeferToScripts, moveHeadScriptsToBody, updateJsReferences } from './optimizeJs.js';
@@ -18,6 +19,7 @@ export interface OptimizeOptions {
   workDir: string;
   siteUrl: string;
   settings: OptimizationSettings;
+  buildId?: string;
   onPageProcessed?: (pageIndex: number) => Promise<void>;
 }
 
@@ -45,7 +47,10 @@ export interface OptimizeResult {
 }
 
 export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeResult> {
-  const { pages, assets, workDir, siteUrl, settings, onPageProcessed } = options;
+  const { pages, assets, workDir, siteUrl, settings, buildId, onPageProcessed } = options;
+  const emit = (phase: 'images' | 'css' | 'js' | 'html' | 'fonts', level: 'info' | 'warn' | 'error', msg: string, meta?: any) => {
+    if (buildId) buildEmitter.log(buildId, phase, level, msg, meta);
+  };
 
   console.log(`[optimize] ========== OPTIMIZATION START ==========`);
   console.log(`[optimize] Pages: ${pages.length}, Assets: ${assets.size}`);
@@ -63,6 +68,8 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
   const jsRenames = new Map<string, string>();
 
   // ═══ STEP 1: Optimize CSS assets (PurgeCSS + CleanCSS + font-display + hash) ═══
+  if (buildId) buildEmitter.emitPhase(buildId, 'css');
+  emit('css', 'info', `Optimizing ${[...assets.entries()].filter(([, a]) => a.type === 'css').length} CSS files...`);
   console.log(`[optimize] Step 1: Optimizing CSS assets...`);
   const cssAssets = [...assets.entries()].filter(([, a]) => a.type === 'css');
   const allHtmlContent = pages.map(p => p.html);
@@ -75,13 +82,17 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       if (result.newPath && result.newPath !== asset.localPath) {
         cssRenames.set(asset.localPath, result.newPath);
       }
+      emit('css', 'info', `Optimized ${asset.localPath}`, { assetUrl: url, savings: { before: result.originalBytes, after: result.optimizedBytes } });
     } catch (err) {
+      emit('css', 'warn', `CSS optimization failed for ${url}: ${(err as Error).message}`);
       console.warn(`[optimize] CSS optimization failed for ${url}:`, (err as Error).message);
     }
   }
   console.log(`[optimize] CSS: ${stats.css.originalBytes} → ${stats.css.optimizedBytes} bytes`);
 
   // ═══ STEP 2: Optimize JS assets (Terser + hash) ═══
+  if (buildId) buildEmitter.emitPhase(buildId, 'js');
+  emit('js', 'info', `Optimizing ${[...assets.entries()].filter(([, a]) => a.type === 'js').length} JS files...`);
   console.log(`[optimize] Step 2: Optimizing JS assets...`);
   const jsAssets = [...assets.entries()].filter(([, a]) => a.type === 'js');
 
@@ -94,6 +105,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       if (result.newPath && result.newPath !== asset.localPath) {
         jsRenames.set(asset.localPath, result.newPath);
       }
+      emit('js', 'info', result.removed ? `Removed ${asset.localPath}` : `Optimized ${asset.localPath}`, { assetUrl: url, savings: { before: result.originalBytes, after: result.optimizedBytes } });
     } catch (err) {
       console.warn(`[optimize] JS optimization failed for ${url}:`, (err as Error).message);
     }
@@ -101,6 +113,8 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
   console.log(`[optimize] JS: ${stats.js.originalBytes} → ${stats.js.optimizedBytes} bytes`);
 
   // ═══ STEP 3: Optimize image assets (Sharp + responsive + SVGO) ═══
+  if (buildId) buildEmitter.emitPhase(buildId, 'images');
+  emit('images', 'info', `Optimizing ${[...assets.entries()].filter(([, a]) => a.type === 'image').length} images...`);
   console.log(`[optimize] Step 3: Optimizing image assets...`);
   const imageAssets = [...assets.entries()].filter(([, a]) => a.type === 'image');
 
@@ -109,13 +123,16 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       const result = await optimizeImage(asset.localPath, workDir, settings);
       stats.images.originalBytes += result.originalBytes;
       stats.images.optimizedBytes += result.optimizedBytes;
+      emit('images', 'info', `Optimized ${asset.localPath}`, { assetUrl: url, savings: { before: result.originalBytes, after: result.optimizedBytes } });
     } catch (err) {
+      emit('images', 'warn', `Image optimization failed for ${url}: ${(err as Error).message}`);
       console.warn(`[optimize] Image optimization failed for ${url}:`, (err as Error).message);
     }
   }
   console.log(`[optimize] Images: ${stats.images.originalBytes} → ${stats.images.optimizedBytes} bytes`);
 
   // ═══ STEP 4: Process each page's HTML ═══
+  if (buildId) buildEmitter.emitPhase(buildId, 'html');
   console.log(`[optimize] Step 4: Processing ${pages.length} pages...`);
   const optimizedPages: OptimizedPage[] = [];
   let totalOptimizedBytes = 0;

@@ -118,6 +118,12 @@ export const api = {
     fetchJson<{ diff: Record<string, any>; overrideCount: number }>(`/sites/${siteId}/settings/diff`),
   resetSettings: (siteId: string) =>
     fetchJson<{ settings: any }>(`/sites/${siteId}/settings/reset`, { method: 'POST' }),
+  getSettingsDefaults: (siteId: string) =>
+    fetchJson<{ defaults: any }>(`/sites/${siteId}/settings/defaults`),
+  getSettingsHistory: (siteId: string) =>
+    fetchJson<{ history: Array<{ id: string; settings: any; changedBy: string; createdAt: string }> }>(`/sites/${siteId}/settings/history`),
+  rollbackSettings: (siteId: string, historyId: string) =>
+    fetchJson<{ settings: any }>(`/sites/${siteId}/settings/rollback/${historyId}`, { method: 'POST' }),
 
   // Asset overrides
   getAssetOverrides: (siteId: string) =>

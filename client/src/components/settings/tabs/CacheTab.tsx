@@ -1,10 +1,24 @@
 import { SettingField, SettingCard, Toggle, Select } from '../SettingField';
 
-interface Props { settings: any; defaults: any; diff: any; onChange: (partial: any) => void; }
+interface Props {
+  settings: any;
+  defaults: any;
+  diff: any;
+  onChange: (partial: any) => void;
+  resourceHints?: any;
+  resourceHintsDiff?: any;
+  onResourceHintsChange?: (partial: any) => void;
+}
 
-export function CacheTab({ settings, defaults, diff, onChange }: Props) {
+export function CacheTab({ settings, defaults, diff, onChange, resourceHints, resourceHintsDiff, onResourceHintsChange }: Props) {
   return (
     <div>
+      <SettingCard title="Cache & Headers" description="Master toggle for _headers file generation">
+        <SettingField label="Enable Headers Generation" isOverridden={diff?.enabled}>
+          <Toggle checked={settings.enabled} onChange={(v) => onChange({ enabled: v })} />
+        </SettingField>
+      </SettingCard>
+
       <SettingCard title="Cache Durations" description="Controls Cache-Control header values in the _headers file">
         {[
           { key: 'html', label: 'HTML Pages', desc: 'Always revalidate for fresh content' },
@@ -62,6 +76,24 @@ export function CacheTab({ settings, defaults, diff, onChange }: Props) {
           <Toggle checked={settings.securityHeaders.xXssProtection} onChange={(v) => onChange({ securityHeaders: { xXssProtection: v } })} />
         </SettingField>
       </SettingCard>
+
+      {/* Resource Hints */}
+      {resourceHints && onResourceHintsChange && (
+        <SettingCard title="Resource Hints" description="Preload, preconnect, and DNS prefetch hints">
+          <SettingField label="Enable Resource Hints" isOverridden={resourceHintsDiff?.enabled}>
+            <Toggle checked={resourceHints.enabled} onChange={(v) => onResourceHintsChange({ enabled: v })} />
+          </SettingField>
+          <SettingField label="Auto-Preload LCP Image" description="Add preload for detected LCP image" isOverridden={resourceHintsDiff?.autoPreloadLcpImage}>
+            <Toggle checked={resourceHints.autoPreloadLcpImage} onChange={(v) => onResourceHintsChange({ autoPreloadLcpImage: v })} />
+          </SettingField>
+          <SettingField label="Auto-Preconnect" description="Detect and add preconnect for used origins" isOverridden={resourceHintsDiff?.autoPreconnect}>
+            <Toggle checked={resourceHints.autoPreconnect} onChange={(v) => onResourceHintsChange({ autoPreconnect: v })} />
+          </SettingField>
+          <SettingField label="Remove Unused Preconnects" description="Clean up preconnect hints for unused origins" isOverridden={resourceHintsDiff?.removeUnusedPreconnects}>
+            <Toggle checked={resourceHints.removeUnusedPreconnects} onChange={(v) => onResourceHintsChange({ removeUnusedPreconnects: v })} />
+          </SettingField>
+        </SettingCard>
+      )}
     </div>
   );
 }

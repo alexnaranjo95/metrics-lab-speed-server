@@ -10,7 +10,10 @@ interface Props {
 export function AiBuildTab({ settings, defaults, diff, onChange }: Props) {
   return (
     <div>
-      <SettingCard title="Claude AI Model" description="AI-powered content optimization using Anthropic's Claude API">
+      <SettingCard title="AI Optimization" description="AI-powered content optimization using Anthropic's Claude API">
+        <SettingField label="Enable AI Optimization" description="Requires Claude API key" isOverridden={diff?.ai?.enabled}>
+          <Toggle checked={settings.ai.enabled} onChange={(v) => onChange('ai', { enabled: v })} />
+        </SettingField>
         <SettingField label="Model" description="Sonnet = fast/cheap. Opus = highest quality (~10x cost)." isOverridden={diff?.ai?.model}>
           <Select
             value={settings.ai.model}
@@ -110,15 +113,38 @@ export function AiBuildTab({ settings, defaults, diff, onChange }: Props) {
         )}
       </SettingCard>
 
+      <SettingCard title="Build Scope">
+        <SettingField label="Default Scope" isOverridden={diff?.build?.scope}>
+          <Select
+            value={settings.build.scope}
+            options={[
+              { value: 'full', label: 'Full (all pages)' },
+              { value: 'homepage', label: 'Homepage only' },
+              { value: 'custom', label: 'Custom URL list' },
+            ]}
+            onChange={(v) => onChange('build', { scope: v })}
+          />
+        </SettingField>
+        <SettingField label="Max Pages" description="Maximum pages to crawl per build" isOverridden={diff?.build?.maxPages}>
+          <Slider value={settings.build.maxPages} min={1} max={500} step={10} onChange={(v) => onChange('build', { maxPages: v })} />
+        </SettingField>
+      </SettingCard>
+
       <SettingCard title="Build Configuration">
         <SettingField label="Page Load Timeout (seconds)" isOverridden={diff?.build?.pageLoadTimeout}>
           <Slider value={settings.build.pageLoadTimeout} min={10} max={120} onChange={(v) => onChange('build', { pageLoadTimeout: v })} />
+        </SettingField>
+        <SettingField label="Pipeline Timeout (minutes)" description="Max total build time before abort" isOverridden={diff?.build?.pipelineTimeout}>
+          <Slider value={settings.build.pipelineTimeout} min={5} max={60} onChange={(v) => onChange('build', { pipelineTimeout: v })} />
         </SettingField>
         <SettingField label="Max Retries" isOverridden={diff?.build?.maxRetries}>
           <Slider value={settings.build.maxRetries} min={0} max={10} onChange={(v) => onChange('build', { maxRetries: v })} />
         </SettingField>
         <SettingField label="Max Concurrent Pages" isOverridden={diff?.build?.maxConcurrentPages}>
           <Slider value={settings.build.maxConcurrentPages} min={1} max={10} onChange={(v) => onChange('build', { maxConcurrentPages: v })} />
+        </SettingField>
+        <SettingField label="Auto-Deploy on Success" description="Automatically deploy to Cloudflare Pages when build succeeds" isOverridden={diff?.build?.autoDeployOnSuccess}>
+          <Toggle checked={settings.build.autoDeployOnSuccess} onChange={(v) => onChange('build', { autoDeployOnSuccess: v })} />
         </SettingField>
       </SettingCard>
     </div>

@@ -46,6 +46,12 @@ const WP_BLOAT = [
 export function HtmlFontsTab({ settings, defaults, diff, onChange }: Props) {
   return (
     <div>
+      <SettingCard title="HTML Optimization" description="Master toggle for HTML minification and bloat removal">
+        <SettingField label="Enable HTML Optimization" isOverridden={diff?.html?.enabled}>
+          <Toggle checked={settings.html.enabled} onChange={(v) => onChange('html', { enabled: v })} />
+        </SettingField>
+      </SettingCard>
+
       <SettingCard title="Safe HTML Minification" description="All enabled by default. Safe for all sites.">
         {SAFE_TOGGLES.map(t => (
           <SettingField key={t.key} label={t.label} isOverridden={diff?.html?.safe?.[t.key]}>
@@ -85,6 +91,12 @@ export function HtmlFontsTab({ settings, defaults, diff, onChange }: Props) {
             checked={settings.html.removeAnalytics}
             onChange={(v) => onChange('html', { removeAnalytics: v })}
           />
+        </SettingField>
+      </SettingCard>
+
+      <SettingCard title="Font Optimization" description="Master toggle for font optimizations">
+        <SettingField label="Enable Font Optimization" isOverridden={diff?.fonts?.enabled}>
+          <Toggle checked={settings.fonts.enabled} onChange={(v) => onChange('fonts', { enabled: v })} />
         </SettingField>
       </SettingCard>
 

@@ -1,5 +1,70 @@
+import { Redis } from 'ioredis';
 import { APP_DEFAULTS, settingsSchema } from './settingsSchema.js';
 import type { OptimizationSettings, SettingsOverride } from './settingsSchema.js';
+import { config } from '../config.js';
+
+// ─── Redis Settings Cache ─────────────────────────────────────────
+
+const CACHE_TTL = 300; // 5 minutes
+const CACHE_PREFIX = 'settings:';
+
+let _redis: Redis | null = null;
+
+function getRedis(): Redis {
+  if (!_redis) {
+    _redis = new Redis({
+      host: config.REDIS_HOST,
+      port: config.REDIS_PORT,
+      ...(config.REDIS_PASSWORD ? { password: config.REDIS_PASSWORD } : {}),
+      maxRetriesPerRequest: 3,
+      lazyConnect: true,
+    });
+    _redis.connect().catch(() => {
+      // Non-fatal — cache miss falls through to DB
+    });
+  }
+  return _redis;
+}
+
+/**
+ * Get resolved settings from cache, or resolve from data and cache the result.
+ */
+export async function getCachedResolvedSettings(
+  siteId: string,
+  siteSettings: SettingsOverride | null | undefined,
+  assetOverrideSettings?: SettingsOverride[]
+): Promise<OptimizationSettings> {
+  try {
+    const redis = getRedis();
+    const cached = await redis.get(`${CACHE_PREFIX}${siteId}`);
+    if (cached) return JSON.parse(cached);
+  } catch {
+    // Cache miss — resolve from data
+  }
+
+  const resolved = resolveSettingsFromData(siteSettings, assetOverrideSettings);
+
+  try {
+    const redis = getRedis();
+    await redis.setex(`${CACHE_PREFIX}${siteId}`, CACHE_TTL, JSON.stringify(resolved));
+  } catch {
+    // Non-fatal
+  }
+
+  return resolved;
+}
+
+/**
+ * Invalidate the cached settings for a site.
+ */
+export async function invalidateSettingsCache(siteId: string): Promise<void> {
+  try {
+    const redis = getRedis();
+    await redis.del(`${CACHE_PREFIX}${siteId}`);
+  } catch {
+    // Non-fatal
+  }
+}
 
 /**
  * Deep merge two objects. Override keys win. Arrays are replaced, not concatenated.

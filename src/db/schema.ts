@@ -106,6 +106,17 @@ export const assetOverrides = pgTable('asset_overrides', {
   siteIdIdx: index('asset_override_site_id_idx').on(table.siteId),
 }));
 
+// Settings change history for rollback
+export const settingsHistory = pgTable('settings_history', {
+  id: text('id').primaryKey(),
+  siteId: text('site_id').notNull().references(() => sites.id, { onDelete: 'cascade' }),
+  settings: jsonb('settings').$type<SettingsOverride>().notNull(),
+  changedBy: text('changed_by').default('api'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  siteIdIdx: index('settings_history_site_id_idx').on(table.siteId),
+}));
+
 // Page-level tracking for partial rebuilds
 export const pages = pgTable('pages', {
   id: text('id').primaryKey(),
@@ -135,6 +146,7 @@ export const sitesRelations = relations(sites, ({ many }) => ({
   builds: many(builds),
   pages: many(pages),
   assetOverrides: many(assetOverrides),
+  settingsHistory: many(settingsHistory),
 }));
 
 export const buildsRelations = relations(builds, ({ one }) => ({
@@ -149,6 +161,10 @@ export const assetOverridesRelations = relations(assetOverrides, ({ one }) => ({
   site: one(sites, { fields: [assetOverrides.siteId], references: [sites.id] }),
 }));
 
+export const settingsHistoryRelations = relations(settingsHistory, ({ one }) => ({
+  site: one(sites, { fields: [settingsHistory.siteId], references: [sites.id] }),
+}));
+
 // Type exports
 export type Site = typeof sites.$inferSelect;
 export type NewSite = typeof sites.$inferInsert;
@@ -158,3 +174,4 @@ export type Page = typeof pages.$inferSelect;
 export type NewPage = typeof pages.$inferInsert;
 export type AssetOverride = typeof assetOverrides.$inferSelect;
 export type NewAssetOverride = typeof assetOverrides.$inferInsert;
+export type SettingsHistoryEntry = typeof settingsHistory.$inferSelect;

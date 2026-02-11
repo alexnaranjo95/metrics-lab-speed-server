@@ -4,6 +4,8 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { hashContent } from '../utils/crypto.js';
 import { isSameOrigin, urlToPath } from '../utils/url.js';
 import { config } from '../config.js';
+import { startScreencast, extractOverlays } from './screencast.js';
+import { buildEmitter } from '../events/buildEmitter.js';
 
 // Standard Chrome UA — avoids triggering Cloudflare/LiteSpeed bot detection
 const CHROME_USER_AGENT =
@@ -15,6 +17,7 @@ export interface CrawlOptions {
   scope: string;
   existingPages: Array<{ path: string; contentHash: string }>;
   targetPages?: string[];
+  buildId?: string;
 }
 
 export interface CrawledPage {
@@ -213,7 +216,8 @@ async function navigateWithRetry(
 }
 
 export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
-  const { siteUrl, workDir, scope, existingPages, targetPages } = options;
+  const { siteUrl, workDir, scope, existingPages, targetPages, buildId } = options;
+  let stopScreencast: (() => Promise<void>) | null = null;
   const maxPages = config.MAX_PAGES_PER_SITE;
   const concurrency = 3;
   const pageTimeout = 30000;
@@ -291,6 +295,17 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
           timeout: pageTimeout,
           maxRetries: 3,
         });
+
+        // Start CDP screencast for live viewer
+        if (buildId) {
+          try {
+            stopScreencast = await startScreencast(page, { buildId });
+            await extractOverlays(page, buildId);
+          } catch (err) {
+            console.warn('[crawl] Screencast start failed (non-fatal):', (err as Error).message);
+          }
+          buildEmitter.log(buildId, 'crawl', 'info', `Crawling homepage: ${homepageUrl}`);
+        }
 
         try {
           const { html, title, internalLinks, assetUrls } = await extractPageData(page, siteUrl);
@@ -452,8 +467,14 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
           }
 
           console.log(`[crawl] Crawled: ${pagePath} (${title}) - ${pageSize} bytes`);
+          if (buildId) {
+            buildEmitter.log(buildId, 'crawl', 'info', `Crawled ${pagePath} (${title})`, { pageUrl: pagePath });
+          }
         } catch (err) {
           console.error(`[crawl] Failed to crawl ${url}:`, (err as Error).message);
+          if (buildId) {
+            buildEmitter.log(buildId, 'crawl', 'warn', `Failed to crawl ${url}: ${(err as Error).message}`);
+          }
           failedPages++;
         } finally {
           if (page) await page.close();
@@ -482,6 +503,10 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
       totalBytes,
     };
   } finally {
+    // Stop screencast before closing browser
+    if (stopScreencast) {
+      try { await stopScreencast(); } catch { /* non-fatal */ }
+    }
     await context.close();
     await browser.close();
     console.log(`[crawl] Browser closed`);

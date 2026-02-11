@@ -7,7 +7,8 @@ import { optimizeAll } from './optimize.js';
 import { deployToCloudflare } from './deploy.js';
 import { measurePerformance } from '../services/lighthouse.js';
 import { notifyDashboard } from '../services/dashboardNotifier.js';
-import { resolveSettingsFromData } from '../shared/settingsMerge.js';
+import { getCachedResolvedSettings } from '../shared/settingsMerge.js';
+import { buildEmitter } from '../events/buildEmitter.js';
 import type { OptimizationSettings } from '../shared/settingsSchema.js';
 
 async function updateBuildStatus(buildId: string, status: string) {
@@ -78,8 +79,8 @@ export async function runBuildPipeline(
   const build = await db.query.builds.findFirst({ where: eq(builds.id, buildId) });
   if (!build) throw new Error(`Build ${buildId} not found`);
 
-  // Resolve and snapshot settings for this build
-  const resolvedSettings = resolveSettingsFromData(site.settings as any);
+  // Resolve and snapshot settings for this build (with Redis cache)
+  const resolvedSettings = await getCachedResolvedSettings(siteId, site.settings as any);
   await updateBuild(buildId, { resolvedSettings });
 
   const workDir = `/tmp/builds/${buildId}`;
@@ -87,6 +88,8 @@ export async function runBuildPipeline(
 
   try {
     // ═══ PHASE 1: CRAWL ═══
+    buildEmitter.emitPhase(buildId, 'crawl');
+    buildEmitter.log(buildId, 'crawl', 'info', `Starting crawl of ${site.siteUrl}`);
     await updateBuildStatus(buildId, 'crawling');
     await notifyDashboard(site, build, 'crawling');
 
@@ -97,7 +100,10 @@ export async function runBuildPipeline(
       scope,
       existingPages: existingPages.map(p => ({ path: p.path, contentHash: p.contentHash ?? '' })),
       targetPages,
+      buildId,
     });
+
+    buildEmitter.log(buildId, 'crawl', 'info', `Crawl complete: ${crawlResult.totalPages} pages, ${crawlResult.assets.size} assets`);
 
     await updateBuild(buildId, {
       pagesTotal: crawlResult.totalPages,
@@ -115,6 +121,8 @@ export async function runBuildPipeline(
     }
 
     // ═══ PHASE 2: OPTIMIZE (with 10-minute timeout) ═══
+    buildEmitter.emitPhase(buildId, 'images');
+    buildEmitter.log(buildId, 'images', 'info', `Starting optimization of ${crawlResult.totalPages} pages...`);
     await updateBuildStatus(buildId, 'optimizing');
     await notifyDashboard(site, build, 'optimizing');
 
@@ -125,8 +133,10 @@ export async function runBuildPipeline(
       workDir,
       siteUrl: site.siteUrl,
       settings: resolvedSettings,
+      buildId,
       onPageProcessed: async (pageIndex: number) => {
         await updateBuild(buildId, { pagesProcessed: pageIndex + 1 });
+        buildEmitter.log(buildId, 'html', 'info', `Processed page ${pageIndex + 1}/${crawlResult.totalPages}`);
       },
     });
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -136,6 +146,11 @@ export async function runBuildPipeline(
       )), OPTIMIZE_TIMEOUT_MS);
     });
     const optimizeResult = await Promise.race([optimizePromise, timeoutPromise]);
+
+    buildEmitter.log(buildId, 'html', 'info', `Optimization complete`, {
+      savings: { before: optimizeResult.stats.images.originalBytes + optimizeResult.stats.css.originalBytes + optimizeResult.stats.js.originalBytes,
+                 after: optimizeResult.stats.images.optimizedBytes + optimizeResult.stats.css.optimizedBytes + optimizeResult.stats.js.optimizedBytes },
+    });
 
     await updateBuild(buildId, {
       jsOriginalBytes: optimizeResult.stats.js.originalBytes,
@@ -149,6 +164,8 @@ export async function runBuildPipeline(
     });
 
     // ═══ PHASE 3: DEPLOY ═══
+    buildEmitter.emitPhase(buildId, 'deploy');
+    buildEmitter.log(buildId, 'deploy', 'info', 'Deploying to Cloudflare Pages...');
     await updateBuildStatus(buildId, 'deploying');
     await notifyDashboard(site, build, 'deploying');
 
@@ -158,7 +175,11 @@ export async function runBuildPipeline(
       siteUrl: site.siteUrl,
     });
 
+    buildEmitter.log(buildId, 'deploy', 'info', `Deployed to ${deployResult.url}`);
+
     // ═══ PHASE 4: MEASURE ═══
+    buildEmitter.emitPhase(buildId, 'measure');
+    buildEmitter.log(buildId, 'measure', 'info', 'Running performance measurement...');
     let originalScore = { performance: 0, ttfb: 0 };
     let edgeScore = { performance: 0, ttfb: 0 };
 
@@ -167,8 +188,9 @@ export async function runBuildPipeline(
         measurePerformance(site.siteUrl),
         measurePerformance(deployResult.url),
       ]);
+      buildEmitter.log(buildId, 'measure', 'info', `Lighthouse: ${originalScore.performance} → ${edgeScore.performance}`);
     } catch (err) {
-      console.error('Lighthouse measurement failed (non-fatal):', err);
+      buildEmitter.log(buildId, 'measure', 'warn', `Lighthouse measurement failed (non-fatal): ${(err as Error).message}`);
     }
 
     // ═══ PHASE 5: FINALIZE ═══
@@ -202,8 +224,13 @@ export async function runBuildPipeline(
     })));
 
     await notifyDashboard(site, build, 'success');
+    buildEmitter.emitComplete(buildId, true);
+    buildEmitter.log(buildId, 'deploy', 'info', 'Build completed successfully');
 
   } catch (error: any) {
+    buildEmitter.log(buildId, 'deploy', 'error', `Build failed: ${error.message}`);
+    buildEmitter.emitComplete(buildId, false, error.message);
+
     const currentBuild = await db.query.builds.findFirst({ where: eq(builds.id, buildId) });
     await updateBuild(buildId, {
       status: 'failed',

@@ -116,6 +116,70 @@ export function BuildPage() {
         <BuildLogs buildId={buildId} enabled={true} />
       </div>
 
+      {/* Before / After Comparison — shown when build is complete */}
+      {build.status === 'success' && (build.originalSizeBytes || build.lighthouseScoreBefore != null) && (
+        <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
+          <div className="px-5 py-3 border-b border-[hsl(var(--border))]">
+            <h3 className="text-sm font-semibold">Performance Comparison</h3>
+          </div>
+          <div className="p-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {build.lighthouseScoreBefore != null && build.lighthouseScoreAfter != null && (
+                <ComparisonCard
+                  label="Lighthouse Score"
+                  before={String(build.lighthouseScoreBefore)}
+                  after={String(build.lighthouseScoreAfter)}
+                  improved={build.lighthouseScoreAfter > build.lighthouseScoreBefore}
+                />
+              )}
+              {build.originalSizeBytes != null && build.optimizedSizeBytes != null && (
+                <ComparisonCard
+                  label="Page Size"
+                  before={formatBytes(build.originalSizeBytes)}
+                  after={formatBytes(build.optimizedSizeBytes)}
+                  improved={build.optimizedSizeBytes < build.originalSizeBytes}
+                  delta={`-${Math.round((1 - build.optimizedSizeBytes / build.originalSizeBytes) * 100)}%`}
+                />
+              )}
+              {build.facadesApplied != null && build.facadesApplied > 0 && (
+                <ComparisonCard
+                  label="Video Facades"
+                  before="Heavy iframes"
+                  after={`${build.facadesApplied} replaced`}
+                  improved={true}
+                />
+              )}
+              {build.scriptsRemoved != null && build.scriptsRemoved > 0 && (
+                <ComparisonCard
+                  label="Scripts Removed"
+                  before="Loaded"
+                  after={`${build.scriptsRemoved} removed`}
+                  improved={true}
+                />
+              )}
+            </div>
+
+            {/* Detailed asset breakdown */}
+            {(build.cssOriginalBytes || build.jsOriginalBytes || build.imageOriginalBytes) && (
+              <div className="mt-4 pt-4 border-t border-[hsl(var(--border))]">
+                <h4 className="text-xs font-medium text-[hsl(var(--muted-foreground))] mb-3 uppercase tracking-wide">Asset Breakdown</h4>
+                <div className="space-y-2">
+                  {build.cssOriginalBytes != null && build.cssOptimizedBytes != null && build.cssOriginalBytes > 0 && (
+                    <BreakdownBar label="CSS" before={build.cssOriginalBytes} after={build.cssOptimizedBytes} />
+                  )}
+                  {build.jsOriginalBytes != null && build.jsOptimizedBytes != null && build.jsOriginalBytes > 0 && (
+                    <BreakdownBar label="JavaScript" before={build.jsOriginalBytes} after={build.jsOptimizedBytes} />
+                  )}
+                  {build.imageOriginalBytes != null && build.imageOptimizedBytes != null && build.imageOriginalBytes > 0 && (
+                    <BreakdownBar label="Images" before={build.imageOriginalBytes} after={build.imageOptimizedBytes} />
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Error display */}
       {build.errorMessage && (
         <div className="rounded-lg border border-[hsl(var(--destructive))]/30 bg-[hsl(var(--destructive))]/5 p-4">
@@ -154,6 +218,47 @@ function MiniStat({ label, value, highlight }: { label: string; value: string; h
     <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2">
       <div className="text-[10px] text-[hsl(var(--muted-foreground))]">{label}</div>
       <div className={cn('text-sm font-semibold', highlight && 'text-[hsl(var(--success))]')}>{value}</div>
+    </div>
+  );
+}
+
+function ComparisonCard({ label, before, after, improved, delta }: {
+  label: string; before: string; after: string; improved: boolean; delta?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-[hsl(var(--border))] p-3">
+      <div className="text-xs text-[hsl(var(--muted-foreground))] mb-2">{label}</div>
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-[hsl(var(--muted-foreground))] line-through">{before}</span>
+        <span className="text-xs text-[hsl(var(--muted-foreground))]">&rarr;</span>
+        <span className={cn('text-sm font-semibold', improved ? 'text-[hsl(var(--success))]' : 'text-[hsl(var(--foreground))]')}>
+          {after}
+        </span>
+      </div>
+      {delta && (
+        <div className="text-xs font-medium text-[hsl(var(--success))] mt-1">{delta}</div>
+      )}
+    </div>
+  );
+}
+
+function BreakdownBar({ label, before, after }: { label: string; before: number; after: number }) {
+  const pct = Math.max(0, Math.min(100, (after / before) * 100));
+  const savings = Math.round((1 - after / before) * 100);
+
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-xs w-20 shrink-0">{label}</span>
+      <div className="flex-1 h-4 bg-[hsl(var(--muted))] rounded-full overflow-hidden relative">
+        <div
+          className="h-full bg-[hsl(var(--success))] rounded-full transition-all"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-xs w-32 shrink-0 text-right text-[hsl(var(--muted-foreground))]">
+        {formatBytes(before)} &rarr; {formatBytes(after)}
+        <span className="text-[hsl(var(--success))] ml-1 font-medium">-{savings}%</span>
+      </span>
     </div>
   );
 }

@@ -1,9 +1,9 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { sites, assetOverrides } from '../db/schema.js';
+import { sites, assetOverrides, settingsHistory } from '../db/schema.js';
 import { validateSettingsOverride, APP_DEFAULTS } from '../shared/settingsSchema.js';
-import { resolveSettingsFromData, diffSettings, matchUrlPattern } from '../shared/settingsMerge.js';
+import { resolveSettingsFromData, diffSettings, matchUrlPattern, invalidateSettingsCache } from '../shared/settingsMerge.js';
 import { requireMasterKey } from '../middleware/auth.js';
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
@@ -61,10 +61,23 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
+      // Save history snapshot before applying
+      const { nanoid } = await import('nanoid');
+      if (site.settings && Object.keys(site.settings as any).length > 0) {
+        await db.insert(settingsHistory).values({
+          id: `sh_${nanoid(12)}`,
+          siteId,
+          settings: site.settings as any,
+          changedBy: 'api',
+        });
+      }
+
       await db.update(sites).set({
         settings: validation.data,
         updatedAt: new Date(),
       }).where(eq(sites.id, siteId));
+
+      await invalidateSettingsCache(siteId);
 
       // Return the resolved settings after the update
       const resolved = resolveSettingsFromData(validation.data);
@@ -101,12 +114,94 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       });
       if (!site) return reply.code(404).send({ error: 'Site not found' });
 
+      // Save history before reset
+      const { nanoid } = await import('nanoid');
+      if (site.settings && Object.keys(site.settings as any).length > 0) {
+        await db.insert(settingsHistory).values({
+          id: `sh_${nanoid(12)}`,
+          siteId,
+          settings: site.settings as any,
+          changedBy: 'api',
+        });
+      }
+
       await db.update(sites).set({
         settings: {},
         updatedAt: new Date(),
       }).where(eq(sites.id, siteId));
 
+      await invalidateSettingsCache(siteId);
+
       return reply.send({ settings: APP_DEFAULTS });
+    }
+  );
+
+  // ─── GET settings defaults ───────────────────────────────────────
+  app.get<{ Params: { siteId: string } }>(
+    '/sites/:siteId/settings/defaults',
+    { preHandler: [requireMasterKey] },
+    async (_req, reply) => {
+      return reply.send({ defaults: APP_DEFAULTS });
+    }
+  );
+
+  // ─── GET settings history ──────────────────────────────────────
+  app.get<{ Params: { siteId: string } }>(
+    '/sites/:siteId/settings/history',
+    { preHandler: [requireMasterKey] },
+    async (req, reply) => {
+      const { siteId } = req.params;
+
+      const history = await db.query.settingsHistory.findMany({
+        where: eq(settingsHistory.siteId, siteId),
+        orderBy: [desc(settingsHistory.createdAt)],
+        limit: 50,
+      });
+
+      return reply.send({ history });
+    }
+  );
+
+  // ─── POST rollback to a previous settings snapshot ─────────────
+  app.post<{ Params: { siteId: string; historyId: string } }>(
+    '/sites/:siteId/settings/rollback/:historyId',
+    { preHandler: [requireMasterKey] },
+    async (req, reply) => {
+      const { siteId, historyId } = req.params;
+
+      const site = await db.query.sites.findFirst({
+        where: eq(sites.id, siteId),
+      });
+      if (!site) return reply.code(404).send({ error: 'Site not found' });
+
+      const entry = await db.query.settingsHistory.findFirst({
+        where: and(
+          eq(settingsHistory.id, historyId),
+          eq(settingsHistory.siteId, siteId)
+        ),
+      });
+      if (!entry) return reply.code(404).send({ error: 'History entry not found' });
+
+      // Save current settings to history before rolling back
+      const { nanoid } = await import('nanoid');
+      if (site.settings && Object.keys(site.settings as any).length > 0) {
+        await db.insert(settingsHistory).values({
+          id: `sh_${nanoid(12)}`,
+          siteId,
+          settings: site.settings as any,
+          changedBy: 'rollback',
+        });
+      }
+
+      await db.update(sites).set({
+        settings: entry.settings,
+        updatedAt: new Date(),
+      }).where(eq(sites.id, siteId));
+
+      await invalidateSettingsCache(siteId);
+
+      const resolved = resolveSettingsFromData(entry.settings as any);
+      return reply.send({ settings: resolved });
     }
   );
 
