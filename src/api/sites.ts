@@ -151,11 +151,8 @@ export async function siteRoutes(app: FastifyInstance) {
     }
 
     return {
-      id: site.id,
-      status: site.status,
-      lastBuild,
-      edgeUrl: site.edgeUrl,
-      pageCount: site.pageCount,
+      site,
+      latestBuild: lastBuild,
     };
   });
 
