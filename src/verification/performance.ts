@@ -20,7 +20,8 @@ export async function measurePerformanceAll(
       try {
         const pageUrl = new URL(pageInfo.path, url).href;
         const startTime = Date.now();
-        await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 60000 });
+        await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.waitForTimeout(3000);
         const loadTimeMs = Date.now() - startTime;
 
         const timing = await page.evaluate(() => {

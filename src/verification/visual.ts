@@ -39,7 +39,8 @@ export async function compareVisuals(
         const page = await context.newPage();
 
         const optimizedPageUrl = new URL(baseline.page === '/' ? '/' : baseline.page, optimizedUrl).href;
-        await page.goto(optimizedPageUrl, { waitUntil: 'networkidle', timeout: 30000 });
+        await page.goto(optimizedPageUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.waitForTimeout(3000);
         await page.waitForTimeout(2000);
 
         // Scroll down and back up like baseline capture

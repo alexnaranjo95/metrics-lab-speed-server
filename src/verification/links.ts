@@ -22,7 +22,8 @@ export async function verifyAllLinks(
 
       try {
         const optimizedPageUrl = new URL(pageInfo.path, optimizedUrl).href;
-        await page.goto(optimizedPageUrl, { waitUntil: 'networkidle', timeout: 30000 });
+        await page.goto(optimizedPageUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.waitForTimeout(3000);
 
         const links = await page.$$eval('a[href]', (anchors) => anchors.map(a => ({
           href: a.getAttribute('href') || '',

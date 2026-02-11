@@ -34,8 +34,8 @@ export async function analyzeSite(
 
     // ─── Discover pages ──────────────────────────────────
     const homepage = await context.newPage();
-    await homepage.goto(siteUrl, { waitUntil: 'networkidle', timeout: 30000 });
-    await homepage.waitForTimeout(2000);
+    await homepage.goto(siteUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await homepage.waitForTimeout(3000);
 
     const discoveredLinks = await homepage.evaluate((baseUrl: string) => {
       const links: string[] = [];
@@ -62,8 +62,8 @@ export async function analyzeSite(
     for (const pageUrl of pageUrls) {
       const page = await context.newPage();
       try {
-        await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 30000 });
-        await page.waitForTimeout(1500);
+        await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.waitForTimeout(3000);
 
         const urlObj = new URL(pageUrl);
         const pagePath = urlObj.pathname || '/';
@@ -310,7 +310,8 @@ async function captureBaselineScreenshots(
           ignoreHTTPSErrors: true,
         });
         const page = await context.newPage();
-        await page.goto(pageInfo.url, { waitUntil: 'networkidle', timeout: 30000 });
+        await page.goto(pageInfo.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.waitForTimeout(3000);
         await page.waitForTimeout(2000);
 
         // Scroll down to trigger lazy content then back up
@@ -379,8 +380,8 @@ async function recordBaselineBehavior(
     const page = await context.newPage();
     try {
       const pageUrl = new URL(pagePath, siteUrl).href;
-      await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 30000 });
-      await page.waitForTimeout(1500);
+      await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      await page.waitForTimeout(3000);
 
       for (const element of pageElements.slice(0, 10)) {
         try {
@@ -407,7 +408,7 @@ async function recordBaselineBehavior(
           });
 
           // Reload to reset state
-          await page.reload({ waitUntil: 'networkidle', timeout: 15000 }).catch(() => {});
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
           await page.waitForTimeout(500);
         } catch {
           baselines.push({ ...element, baselineResult: 'interaction-failed', passed: false });

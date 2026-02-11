@@ -40,7 +40,8 @@ export async function verifyFunctionalBehavior(
         const page = await context.newPage();
         try {
           const pageUrl = new URL(pagePath, optimizedUrl).href;
-          await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 30000 });
+          await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+          await page.waitForTimeout(3000);
           await page.waitForTimeout(1000);
 
           const baseline = baselines.find(b => b.selector === element.selector && b.page === element.page);
