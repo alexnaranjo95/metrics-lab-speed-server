@@ -25,15 +25,17 @@ export async function measurePerformance(url: string): Promise<PerformanceScore>
   try {
     const context = await browser.newContext({
       viewport: { width: 1440, height: 900 },
+      ignoreHTTPSErrors: true,
     });
     const page = await context.newPage();
 
     // Navigate and collect timing
     const startTime = Date.now();
     await page.goto(url, {
-      waitUntil: 'networkidle',
+      waitUntil: 'domcontentloaded',
       timeout: 60000,
     });
+    await page.waitForTimeout(3000);
     const loadTime = Date.now() - startTime;
 
     // Extract Navigation Timing metrics

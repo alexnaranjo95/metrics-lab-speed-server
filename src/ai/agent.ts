@@ -170,7 +170,15 @@ export async function runOptimizationAgent(siteId: string): Promise<AgentReport>
         }
 
         log(`Build complete. Edge URL: ${edgeUrl}`);
-        await sleep(5000);
+
+        // Wait for SSL to be ready on the Cloudflare Pages URL
+        log('Waiting for SSL certificate provisioning...');
+        const sslReady = await waitForSslReady(edgeUrl, 120000);
+        if (sslReady) {
+          log('SSL ready — site is accessible');
+        } else {
+          log('SSL not ready after 2 minutes — proceeding with verification anyway');
+        }
 
         // ── PHASE 3: VERIFY ──
         setPhase('verifying');
@@ -356,4 +364,18 @@ function logSettingsDecisions(settings: Record<string, any>, log: (msg: string) 
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
+}
+
+async function waitForSslReady(url: string, timeoutMs: number): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const response = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(10000) });
+      if (response.ok || response.status === 304) return true;
+    } catch {
+      // SSL or network error — keep waiting
+    }
+    await sleep(10000);
+  }
+  return false;
 }

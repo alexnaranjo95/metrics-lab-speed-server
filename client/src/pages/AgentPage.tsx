@@ -82,7 +82,7 @@ export function AgentPage() {
       setPhase(status.phase);
       if (status.phase === 'complete' || status.phase === 'failed') setIsComplete(true);
     }
-    if (status.iteration) setIteration(status.iteration);
+    if (status.iteration != null) setIteration(status.iteration);
     if (status.domain) setDomain(status.domain);
     if (status.startedAt) setStartedAt(status.startedAt);
     if (status.phaseTimings) setPhaseTimings(status.phaseTimings);
@@ -135,7 +135,7 @@ export function AgentPage() {
             </div>
             <div className="flex items-center gap-3 text-sm text-[hsl(var(--muted-foreground))] mt-0.5">
               <span className="font-medium text-[hsl(var(--foreground))]">{displayDomain}</span>
-              <span>Iteration {iteration}/{10}</span>
+              <span>Iteration {iteration}/{status?.maxIterations ?? 10}</span>
               <span className="flex items-center gap-1">
                 <Clock className="h-3 w-3" />
                 {elapsed}

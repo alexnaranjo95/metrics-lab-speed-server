@@ -183,6 +183,15 @@ export async function runBuildPipeline(
 
     buildEmitter.log(buildId, 'deploy', 'info', `Deployed to ${deployResult.url}`);
 
+    // Wait for SSL certificate provisioning on Cloudflare Pages
+    buildEmitter.log(buildId, 'deploy', 'info', 'Waiting for SSL certificate provisioning...');
+    const sslReady = await waitForSslReady(deployResult.url, 120000);
+    if (sslReady) {
+      buildEmitter.log(buildId, 'deploy', 'info', 'SSL ready — site is accessible');
+    } else {
+      buildEmitter.log(buildId, 'deploy', 'warn', 'SSL not ready after 2 minutes — continuing anyway');
+    }
+
     // ═══ PHASE 4: MEASURE ═══
     buildEmitter.emitPhase(buildId, 'measure');
     buildEmitter.log(buildId, 'measure', 'info', 'Running performance measurement...');
@@ -258,4 +267,27 @@ export async function runBuildPipeline(
     // Clean up the work directory
     await fs.rm(workDir, { recursive: true, force: true });
   }
+}
+
+/**
+ * Wait for a Cloudflare Pages URL to become accessible (SSL provisioning).
+ * Polls every 10 seconds. Returns true if accessible, false if timeout.
+ */
+async function waitForSslReady(url: string, timeoutMs: number): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const response = await fetch(url, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(10000),
+        // @ts-ignore — Node 18+ supports this
+        dispatcher: undefined,
+      });
+      if (response.ok || response.status === 304) return true;
+    } catch {
+      // SSL error or network error — keep waiting
+    }
+    await new Promise(r => setTimeout(r, 10000));
+  }
+  return false;
 }
