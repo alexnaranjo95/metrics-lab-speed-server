@@ -63,9 +63,13 @@ export const aiAgentRoutes: FastifyPluginAsync = async (app) => {
       return reply.send({
         running: state.phase !== 'complete' && state.phase !== 'failed',
         runId: state.runId,
+        domain: state.domain,
+        startedAt: state.startedAt,
         phase: state.phase,
         iteration: state.iteration,
         maxIterations: state.maxIterations,
+        phaseTimings: state.phaseTimings,
+        lastError: state.lastError,
         logCount: state.logs.length,
         recentLogs: state.logs.slice(-50),
       });

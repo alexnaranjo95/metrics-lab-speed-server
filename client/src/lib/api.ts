@@ -158,7 +158,19 @@ export const api = {
   startAIOptimize: (siteId: string) =>
     fetchJson<{ message: string; jobId: string; siteId: string }>(`/sites/${siteId}/ai/optimize`, { method: 'POST', body: '{}' }),
   getAgentStatus: (siteId: string) =>
-    fetchJson<{ running: boolean; runId?: string; phase?: string; iteration?: number; maxIterations?: number; logCount?: number; recentLogs?: Array<{ timestamp: string; message: string }> }>(`/sites/${siteId}/ai/status`),
+    fetchJson<{
+      running: boolean;
+      runId?: string;
+      domain?: string;
+      startedAt?: string;
+      phase?: string;
+      iteration?: number;
+      maxIterations?: number;
+      phaseTimings?: Record<string, { start: string; end?: string }>;
+      lastError?: string;
+      logCount?: number;
+      recentLogs?: Array<{ timestamp: string; message: string }>;
+    }>(`/sites/${siteId}/ai/status`),
   getAgentReport: (siteId: string) =>
     fetchJson<{ report: any }>(`/sites/${siteId}/ai/report`),
   stopAgent: (siteId: string) =>

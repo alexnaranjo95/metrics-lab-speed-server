@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, Outlet, useLocation, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Zap, ChevronRight, LogIn } from 'lucide-react';
+import { ChevronRight, LogIn } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export function Shell() {
@@ -17,7 +17,11 @@ export function Shell() {
           <div className="flex h-14 items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
               <Link to="/" className="flex items-center gap-2 font-semibold text-lg shrink-0">
-                <Zap className="h-5 w-5 text-[hsl(var(--primary))]" />
+                <img
+                  src="/metrics-lab-logo.png"
+                  alt="Metrics Lab"
+                  className="h-5 w-auto"
+                />
                 <span className="hidden sm:inline">Metrics Lab</span>
               </Link>
               {breadcrumbs.length > 0 && (
