@@ -130,8 +130,8 @@ export async function runOptimizationAgent(siteId: string): Promise<AgentReport>
       await db.insert(builds).values({ id: buildId, siteId, scope: 'full', triggeredBy: 'ai-agent', status: 'queued' });
       await buildQueue.add('build' as any, { buildId, siteId, scope: 'full' }, { jobId: buildId });
 
-      log(`Build ${buildId} queued. Waiting for completion...`);
-      const buildResult = await waitForBuild(buildId, 600000);
+      log(`Build ${buildId} queued. Waiting for completion (up to 30 min)...`);
+      const buildResult = await waitForBuild(buildId, 1800000, log);
 
       if (buildResult.status === 'failed') {
         log(`Build failed: ${buildResult.errorMessage || 'Unknown error'}`);
@@ -265,11 +265,20 @@ export async function runOptimizationAgent(siteId: string): Promise<AgentReport>
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
-async function waitForBuild(buildId: string, timeoutMs: number): Promise<{ status: string; edgeUrl: string | null; errorMessage: string | null }> {
+async function waitForBuild(buildId: string, timeoutMs: number, log?: (msg: string) => void): Promise<{ status: string; edgeUrl: string | null; errorMessage: string | null }> {
   const start = Date.now();
+  let lastStatus = '';
   while (Date.now() - start < timeoutMs) {
     const build = await db.query.builds.findFirst({ where: eq(builds.id, buildId) });
     if (!build) throw new Error(`Build ${buildId} not found`);
+
+    // Log progress when status changes
+    if (build.status !== lastStatus) {
+      const pages = build.pagesTotal ? `${build.pagesProcessed || 0}/${build.pagesTotal} pages` : '';
+      if (log) log(`Build status: ${build.status}${pages ? ` (${pages})` : ''}`);
+      lastStatus = build.status;
+    }
+
     if (build.status === 'success' || build.status === 'failed') {
       const site = await db.query.sites.findFirst({ where: eq(sites.id, build.siteId) });
       return { status: build.status, edgeUrl: site?.edgeUrl || null, errorMessage: build.errorMessage };
