@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -20,12 +21,19 @@ const STATUS_MAP: Record<string, string> = {
 export function BuildPage() {
   const { siteId, buildId } = useParams<{ siteId: string; buildId: string }>();
 
+  const [pollEnabled, setPollEnabled] = useState(true);
+
   const { data: build, isLoading } = useQuery({
     queryKey: ['build', siteId, buildId],
-    queryFn: () => api.getBuild(siteId!, buildId!),
+    queryFn: async () => {
+      const data = await api.getBuild(siteId!, buildId!);
+      if (data.status === 'success' || data.status === 'failed') {
+        setPollEnabled(false);
+      }
+      return data;
+    },
     enabled: !!siteId && !!buildId,
-    refetchInterval: (data) =>
-      data?.status === 'success' || data?.status === 'failed' ? false : 3000,
+    refetchInterval: pollEnabled ? 3000 : false,
   });
 
   if (!siteId || !buildId) return <div>Missing parameters</div>;
