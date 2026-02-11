@@ -1,12 +1,14 @@
 import fs from 'fs/promises';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { sites, builds, pages as pagesTable } from '../db/schema.js';
+import { sites, builds, pages as pagesTable, assetOverrides } from '../db/schema.js';
 import { crawlSite } from './crawl.js';
 import { optimizeAll } from './optimize.js';
 import { deployToCloudflare } from './deploy.js';
 import { measurePerformance } from '../services/lighthouse.js';
 import { notifyDashboard } from '../services/dashboardNotifier.js';
+import { resolveSettingsFromData } from '../shared/settingsMerge.js';
+import type { OptimizationSettings } from '../shared/settingsSchema.js';
 
 async function updateBuildStatus(buildId: string, status: string) {
   const updates: Record<string, any> = { status };
@@ -76,6 +78,10 @@ export async function runBuildPipeline(
   const build = await db.query.builds.findFirst({ where: eq(builds.id, buildId) });
   if (!build) throw new Error(`Build ${buildId} not found`);
 
+  // Resolve and snapshot settings for this build
+  const resolvedSettings = resolveSettingsFromData(site.settings as any);
+  await updateBuild(buildId, { resolvedSettings });
+
   const workDir = `/tmp/builds/${buildId}`;
   await fs.mkdir(workDir, { recursive: true });
 
@@ -118,6 +124,7 @@ export async function runBuildPipeline(
       assets: crawlResult.assets,
       workDir,
       siteUrl: site.siteUrl,
+      settings: resolvedSettings,
       onPageProcessed: async (pageIndex: number) => {
         await updateBuild(buildId, { pagesProcessed: pageIndex + 1 });
       },

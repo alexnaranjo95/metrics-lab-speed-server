@@ -1,26 +1,33 @@
 import * as cheerio from 'cheerio';
 import { minify as htmlMinify } from 'html-minifier-terser';
 import { WP_CORE_SCRIPT_PATTERNS, WP_CORE_STYLE_PATTERNS, WP_META_SELECTORS, PLUGIN_SCRIPT_PATTERNS, PLUGIN_STYLE_PATTERNS, ANALYTICS_PATTERNS } from './wordpressBloat.js';
+import type { OptimizationSettings } from '../shared/settingsSchema.js';
 
 /**
  * Optimize HTML by removing WordPress bloat, plugin assets, and minifying.
  */
-export async function optimizeHtml(html: string): Promise<string> {
+export async function optimizeHtml(html: string, settings?: OptimizationSettings): Promise<string> {
   const $ = cheerio.load(html);
+  const wpBloat = settings?.html.wpHeadBloat;
+  const jsRemove = settings?.js.removeScripts;
 
   // ── 1. WordPress Core Bloat Removal ──
-  removeWordPressCoreScripts($);
-  removeWordPressCoreStyles($);
-  removeWordPressMetaTags($);
+  removeWordPressCoreScripts($, jsRemove);
+  removeWordPressCoreStyles($, jsRemove);
+  removeWordPressMetaTags($, wpBloat);
   removeWordPressDuotoneFilters($);
   removeGutenbergComments($);
-  removeBlockLibraryCss($);
+  if (!jsRemove || jsRemove.wpBlockLibrary) {
+    removeBlockLibraryCss($);
+  }
 
   // ── 2. Plugin Bloat Removal (conditional) ──
   removePluginBloat($);
 
-  // ── 3. Analytics Removal (always) ──
-  removeAnalytics($);
+  // ── 3. Analytics Removal ──
+  if (settings?.html.removeAnalytics !== false) {
+    removeAnalytics($);
+  }
 
   // ── 4. HTML Minification with html-minifier-terser ──
   let output = $.html();
@@ -29,8 +36,16 @@ export async function optimizeHtml(html: string): Promise<string> {
   return output;
 }
 
-function removeWordPressCoreScripts($: cheerio.CheerioAPI) {
+function removeWordPressCoreScripts($: cheerio.CheerioAPI, jsRemove?: OptimizationSettings['js']['removeScripts']) {
   for (const pattern of WP_CORE_SCRIPT_PATTERNS) {
+    // Check per-script settings
+    if (jsRemove) {
+      if (pattern.selector?.includes('wp-emoji') && !jsRemove.wpEmoji) continue;
+      if (pattern.selector?.includes('jquery-migrate') && !jsRemove.jqueryMigrate) continue;
+      if (pattern.selector?.includes('wp-embed') && !jsRemove.wpEmbed) continue;
+      if (pattern.selector?.includes('wp-polyfill') && !jsRemove.wpPolyfill) continue;
+      if (pattern.selector?.includes('comment-reply') && !jsRemove.commentReply) continue;
+    }
     if (pattern.selector) {
       $(pattern.selector).remove();
     }
@@ -45,14 +60,31 @@ function removeWordPressCoreScripts($: cheerio.CheerioAPI) {
   }
 }
 
-function removeWordPressCoreStyles($: cheerio.CheerioAPI) {
+function removeWordPressCoreStyles($: cheerio.CheerioAPI, jsRemove?: OptimizationSettings['js']['removeScripts']) {
   for (const pattern of WP_CORE_STYLE_PATTERNS) {
+    if (jsRemove) {
+      if (pattern.selector.includes('admin-bar') && !jsRemove.adminBar) continue;
+      if (pattern.selector.includes('dashicons') && !jsRemove.dashicons) continue;
+    }
     $(pattern.selector).remove();
   }
 }
 
-function removeWordPressMetaTags($: cheerio.CheerioAPI) {
+function removeWordPressMetaTags($: cheerio.CheerioAPI, wpBloat?: OptimizationSettings['html']['wpHeadBloat']) {
+  const selectorChecks: Record<string, keyof NonNullable<typeof wpBloat>> = {
+    'link[rel="EditURI"]': 'editUri',
+    'link[rel="wlwmanifest"]': 'wlwmanifest',
+    'meta[name="generator"]': 'metaGenerator',
+    'link[rel="shortlink"]': 'shortlink',
+    'link[rel="alternate"][type*="rss"]': 'rssFeedLinks',
+    'link[rel="dns-prefetch"][href*="s.w.org"]': 'dnsPrefetchWpOrg',
+    'link[rel="https://api.w.org/"]': 'apiWpOrg',
+    'link[rel="alternate"][type*="oembed"]': 'oembedDiscovery',
+  };
+
   for (const selector of WP_META_SELECTORS) {
+    const settingKey = selectorChecks[selector];
+    if (wpBloat && settingKey && !wpBloat[settingKey]) continue;
     $(selector).remove();
   }
 }

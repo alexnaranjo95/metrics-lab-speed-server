@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio';
 import sharp from 'sharp';
 import fs from 'fs/promises';
 import path from 'path';
+import type { OptimizationSettings } from '../shared/settingsSchema.js';
 
 export interface VideoFacadeResult {
   html: string;
@@ -115,10 +116,17 @@ document.querySelectorAll('.mls-video-facade[data-video-id="${videoId}"]').forEa
  */
 export async function replaceVideoEmbeds(
   html: string,
-  workDir: string
+  workDir: string,
+  settings?: OptimizationSettings
 ): Promise<VideoFacadeResult> {
+  // Check if facades are enabled
+  if (settings?.video.facadesEnabled === false) {
+    return { html, facadesApplied: 0 };
+  }
+
   const $ = cheerio.load(html);
   let facadesApplied = 0;
+  const platformSettings = settings?.video.platforms;
 
   const iframes = $('iframe').toArray();
 
@@ -129,6 +137,11 @@ export async function replaceVideoEmbeds(
 
     // Try to match against known video platforms
     for (const [p, patterns] of Object.entries(VIDEO_PATTERNS)) {
+      // Check if platform is enabled in settings
+      if (platformSettings) {
+        const key = p as keyof typeof platformSettings;
+        if (key in platformSettings && !platformSettings[key]) continue;
+      }
       for (const pattern of patterns) {
         const match = src.match(pattern);
         if (match) {

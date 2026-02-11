@@ -3,6 +3,10 @@ import path from 'path';
 import sharp from 'sharp';
 import { optimize as svgoOptimize } from 'svgo';
 import { hashContent } from '../utils/crypto.js';
+import type { OptimizationSettings } from '../shared/settingsSchema.js';
+
+// Default responsive widths for use in rewriteImageTags (used when no settings passed)
+const DEFAULT_RESPONSIVE_WIDTHS = [320, 640, 768, 1024, 1280, 1920];
 
 export interface ImageOptimizeResult {
   originalBytes: number;
@@ -12,24 +16,24 @@ export interface ImageOptimizeResult {
   responsivePaths?: string[];
 }
 
-// Aggressive quality for Lighthouse 90+
-const JPEG_QUALITY = 75;
-const PNG_QUALITY = 75;
-const WEBP_QUALITY = 75;
-const AVIF_QUALITY = 60;
-
-// Responsive breakpoints
-const RESPONSIVE_WIDTHS = [400, 800, 1200];
-const MAX_WIDTH = 1920;
-
 /**
  * Optimize a single image file with Sharp.
  * Creates WebP/AVIF variants and responsive sizes.
  */
 export async function optimizeImage(
   imageRelativePath: string,
-  workDir: string
+  workDir: string,
+  settings?: OptimizationSettings
 ): Promise<ImageOptimizeResult> {
+  // Derive quality settings from resolved settings or use defaults
+  const JPEG_QUALITY = settings?.images.jpeg.quality ?? 80;
+  const PNG_QUALITY = settings?.images.jpeg.quality ?? 80;
+  const WEBP_QUALITY = settings?.images.webp.quality ?? 80;
+  const AVIF_QUALITY = settings?.images.avif.quality ?? 50;
+  const WEBP_EFFORT = settings?.images.webp.effort ?? 4;
+  const AVIF_EFFORT = settings?.images.avif.effort ?? 4;
+  const RESPONSIVE_WIDTHS = settings?.images.breakpoints ?? [320, 640, 768, 1024, 1280, 1920];
+  const MAX_WIDTH = settings?.images.maxWidth ?? 2560;
   const imagePath = path.join(workDir, imageRelativePath);
 
   let inputBuffer: Buffer;
@@ -57,7 +61,11 @@ export async function optimizeImage(
     const srcWidth = metadata.width || MAX_WIDTH;
 
     // Optimize the original format
-    let optimizedBuffer = await optimizeByFormat(inputBuffer, ext, srcWidth);
+    let optimizedBuffer = await optimizeByFormat(inputBuffer, ext, srcWidth, {
+      jpegQuality: JPEG_QUALITY, pngQuality: PNG_QUALITY,
+      webpQuality: WEBP_QUALITY, webpEffort: WEBP_EFFORT,
+      avifQuality: AVIF_QUALITY, avifEffort: AVIF_EFFORT, maxWidth: MAX_WIDTH,
+    });
 
     // Only use optimized if smaller
     if (optimizedBuffer.length >= originalBytes) {
@@ -74,7 +82,7 @@ export async function optimizeImage(
       try {
         const webpBuffer = await sharp(inputBuffer)
           .resize({ width: Math.min(srcWidth, MAX_WIDTH), withoutEnlargement: true })
-          .webp({ quality: WEBP_QUALITY, effort: 6 })
+          .webp({ quality: WEBP_QUALITY, effort: WEBP_EFFORT })
           .toBuffer();
         webpPath = imagePath.replace(/\.[^.]+$/, '.webp');
         await fs.writeFile(webpPath, webpBuffer);
@@ -87,7 +95,7 @@ export async function optimizeImage(
       try {
         const avifBuffer = await sharp(inputBuffer)
           .resize({ width: Math.min(srcWidth, MAX_WIDTH), withoutEnlargement: true })
-          .avif({ quality: AVIF_QUALITY, effort: 4 })
+          .avif({ quality: AVIF_QUALITY, effort: AVIF_EFFORT })
           .toBuffer();
         avifPath = imagePath.replace(/\.[^.]+$/, '.avif');
         await fs.writeFile(avifPath, avifBuffer);
@@ -101,7 +109,7 @@ export async function optimizeImage(
       try {
         const resizedBuffer = await sharp(inputBuffer)
           .resize({ width: w, withoutEnlargement: true })
-          .webp({ quality: WEBP_QUALITY, effort: 6 })
+          .webp({ quality: WEBP_QUALITY, effort: WEBP_EFFORT })
           .toBuffer();
         const resizedPath = imagePath.replace(/\.[^.]+$/, `-${w}w.webp`);
         await fs.writeFile(resizedPath, resizedBuffer);
@@ -116,19 +124,26 @@ export async function optimizeImage(
   }
 }
 
-async function optimizeByFormat(input: Buffer, ext: string, srcWidth: number): Promise<Buffer> {
-  const pipeline = sharp(input).resize({ width: Math.min(srcWidth, MAX_WIDTH), withoutEnlargement: true });
+interface FormatOptions {
+  jpegQuality: number; pngQuality: number;
+  webpQuality: number; webpEffort: number;
+  avifQuality: number; avifEffort: number;
+  maxWidth: number;
+}
+
+async function optimizeByFormat(input: Buffer, ext: string, srcWidth: number, opts: FormatOptions): Promise<Buffer> {
+  const pipeline = sharp(input).resize({ width: Math.min(srcWidth, opts.maxWidth), withoutEnlargement: true });
 
   switch (ext) {
     case '.jpg':
     case '.jpeg':
-      return pipeline.jpeg({ quality: JPEG_QUALITY, progressive: true, mozjpeg: true }).toBuffer();
+      return pipeline.jpeg({ quality: opts.jpegQuality, progressive: true, mozjpeg: true }).toBuffer();
     case '.png':
-      return pipeline.png({ quality: PNG_QUALITY, compressionLevel: 9 }).toBuffer();
+      return pipeline.png({ quality: opts.pngQuality, compressionLevel: 9 }).toBuffer();
     case '.webp':
-      return pipeline.webp({ quality: WEBP_QUALITY, effort: 6 }).toBuffer();
+      return pipeline.webp({ quality: opts.webpQuality, effort: opts.webpEffort }).toBuffer();
     case '.avif':
-      return pipeline.avif({ quality: AVIF_QUALITY, effort: 4 }).toBuffer();
+      return pipeline.avif({ quality: opts.avifQuality, effort: opts.avifEffort }).toBuffer();
     default:
       return input;
   }
@@ -216,7 +231,7 @@ export function rewriteImageTags(html: string, workDir: string): string {
 
       // Build responsive srcset
       const srcsetParts: string[] = [];
-      for (const w of RESPONSIVE_WIDTHS) {
+      for (const w of DEFAULT_RESPONSIVE_WIDTHS) {
         srcsetParts.push(`${basePath}-${w}w.webp ${w}w`);
       }
       srcsetParts.push(`${webpSrc} 1200w`); // Original as largest

@@ -3,6 +3,7 @@ import path from 'path';
 import { PurgeCSS } from 'purgecss';
 import CleanCSS from 'clean-css';
 import { hashContent } from '../utils/crypto.js';
+import type { OptimizationSettings } from '../shared/settingsSchema.js';
 
 export interface CssOptimizeResult {
   originalBytes: number;
@@ -17,7 +18,8 @@ export interface CssOptimizeResult {
 export async function optimizeCssFile(
   cssRelativePath: string,
   htmlContents: string[],
-  workDir: string
+  workDir: string,
+  settings?: OptimizationSettings
 ): Promise<CssOptimizeResult> {
   const cssPath = path.join(workDir, cssRelativePath);
 
@@ -32,26 +34,42 @@ export async function optimizeCssFile(
 
   // Step 1: PurgeCSS — remove unused selectors
   let purgedCss = cssContent;
-  try {
-    const purgeResults = await new PurgeCSS().purge({
-      content: htmlContents.map(html => ({ raw: html, extension: 'html' })),
-      css: [{ raw: cssContent }],
-      safelist: {
-        standard: ['active', 'open', 'visible', 'show', 'hide', 'collapsed', 'hidden', 'current-menu-item'],
-        deep: [/^wp-/, /^menu-/, /^widget-/, /^comment-/, /^post-/, /^page-/, /^has-/, /^is-/],
-        greedy: [/modal/, /dropdown/, /tooltip/, /popover/, /carousel/, /slider/, /swiper/],
-      },
-    });
+  const purgeEnabled = settings?.css.purge ?? true;
+  if (purgeEnabled) {
+    try {
+      // Build safelist from settings (convert string regex patterns to RegExp)
+      const safelistConfig = settings?.css.purgeSafelist;
+      const deepPatterns = (safelistConfig?.deep ?? ['/^wp-/', '/^is-/', '/^has-/']).map(p => {
+        if (p.startsWith('/') && p.endsWith('/')) return new RegExp(p.slice(1, -1));
+        return new RegExp(p);
+      });
+      const greedyPatterns = (safelistConfig?.greedy ?? ['/modal/', '/dropdown/', '/tooltip/']).map(p => {
+        if (p.startsWith('/') && p.endsWith('/')) return new RegExp(p.slice(1, -1));
+        return new RegExp(p);
+      });
 
-    if (purgeResults.length > 0 && purgeResults[0].css) {
-      purgedCss = purgeResults[0].css;
+      const purgeResults = await new PurgeCSS().purge({
+        content: htmlContents.map(html => ({ raw: html, extension: 'html' })),
+        css: [{ raw: cssContent }],
+        safelist: {
+          standard: safelistConfig?.standard ?? ['active', 'open', 'visible', 'show', 'hide', 'collapsed', 'hidden', 'current-menu-item'],
+          deep: deepPatterns.length > 0 ? deepPatterns : [/^wp-/, /^menu-/, /^widget-/, /^comment-/, /^post-/, /^page-/, /^has-/, /^is-/],
+          greedy: greedyPatterns.length > 0 ? greedyPatterns : [/modal/, /dropdown/, /tooltip/, /popover/, /carousel/, /slider/, /swiper/],
+        },
+          rejected: settings?.css.purgeTestMode ?? false,
+      });
+
+      if (purgeResults.length > 0 && purgeResults[0].css) {
+        purgedCss = purgeResults[0].css;
+      }
+    } catch (err) {
+      console.warn('[css] PurgeCSS failed, using original CSS:', (err as Error).message);
     }
-  } catch (err) {
-    console.warn('[css] PurgeCSS failed, using original CSS:', (err as Error).message);
   }
 
-  // Step 2: Inject font-display: swap into @font-face rules
-  purgedCss = injectFontDisplaySwap(purgedCss);
+  // Step 2: Inject font-display into @font-face rules
+  const fontDisplayValue = settings?.css.fontDisplay ?? 'swap';
+  purgedCss = injectFontDisplay(purgedCss, fontDisplayValue);
 
   // Step 3: CleanCSS — minify
   let minifiedCss = purgedCss;
@@ -87,14 +105,14 @@ export async function optimizeCssFile(
 }
 
 /**
- * Inject font-display: swap into @font-face rules that don't have it.
+ * Inject font-display into @font-face rules that don't have it.
  */
-function injectFontDisplaySwap(css: string): string {
+function injectFontDisplay(css: string, value: string = 'swap'): string {
   return css.replace(/@font-face\s*\{([^}]*)\}/gi, (match, body) => {
     if (/font-display\s*:/i.test(body)) {
       return match; // Already has font-display
     }
-    return `@font-face{${body};font-display:swap}`;
+    return `@font-face{${body};font-display:${value}}`;
   });
 }
 

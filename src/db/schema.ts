@@ -1,5 +1,6 @@
-import { pgTable, text, integer, bigint, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, timestamp, jsonb, index, uuid } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
+import type { SettingsOverride, OptimizationSettings } from '../shared/settingsSchema.js';
 
 export const sites = pgTable('sites', {
   id: text('id').primaryKey(),
@@ -24,6 +25,9 @@ export const sites = pgTable('sites', {
   // Stats
   pageCount: integer('page_count'),
   totalSizeBytes: bigint('total_size_bytes', { mode: 'number' }),
+
+  // Hierarchical settings (sparse overrides — only non-default values stored)
+  settings: jsonb('settings').$type<SettingsOverride>().default({}),
 
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -70,6 +74,9 @@ export const builds = pgTable('builds', {
   errorMessage: text('error_message'),
   errorDetails: jsonb('error_details'),
 
+  // Resolved settings snapshot (full merged settings at build start)
+  resolvedSettings: jsonb('resolved_settings').$type<OptimizationSettings>(),
+
   // Build log entries
   buildLog: jsonb('build_log').$type<Array<{
     timestamp: string;
@@ -84,6 +91,19 @@ export const builds = pgTable('builds', {
 }, (table) => ({
   siteIdIdx: index('build_site_id_idx').on(table.siteId),
   statusIdx: index('build_status_idx').on(table.status),
+}));
+
+// Asset-level settings overrides (per URL pattern)
+export const assetOverrides = pgTable('asset_overrides', {
+  id: text('id').primaryKey(),
+  siteId: text('site_id').notNull().references(() => sites.id, { onDelete: 'cascade' }),
+  urlPattern: text('url_pattern').notNull(),
+  assetType: text('asset_type'),  // 'image' | 'script' | 'style' | 'font' | 'video' | null
+  settings: jsonb('settings').$type<SettingsOverride>().default({}),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  siteIdIdx: index('asset_override_site_id_idx').on(table.siteId),
 }));
 
 // Page-level tracking for partial rebuilds
@@ -114,6 +134,7 @@ export const pages = pgTable('pages', {
 export const sitesRelations = relations(sites, ({ many }) => ({
   builds: many(builds),
   pages: many(pages),
+  assetOverrides: many(assetOverrides),
 }));
 
 export const buildsRelations = relations(builds, ({ one }) => ({
@@ -124,6 +145,10 @@ export const pagesRelations = relations(pages, ({ one }) => ({
   site: one(sites, { fields: [pages.siteId], references: [sites.id] }),
 }));
 
+export const assetOverridesRelations = relations(assetOverrides, ({ one }) => ({
+  site: one(sites, { fields: [assetOverrides.siteId], references: [sites.id] }),
+}));
+
 // Type exports
 export type Site = typeof sites.$inferSelect;
 export type NewSite = typeof sites.$inferInsert;
@@ -131,3 +156,5 @@ export type Build = typeof builds.$inferSelect;
 export type NewBuild = typeof builds.$inferInsert;
 export type Page = typeof pages.$inferSelect;
 export type NewPage = typeof pages.$inferInsert;
+export type AssetOverride = typeof assetOverrides.$inferSelect;
+export type NewAssetOverride = typeof assetOverrides.$inferInsert;

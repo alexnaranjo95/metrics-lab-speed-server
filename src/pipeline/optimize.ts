@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import type { CrawledPage, AssetInfo } from './crawl.js';
+import type { OptimizationSettings } from '../shared/settingsSchema.js';
 import { optimizeHtml } from './optimizeHtml.js';
 import { optimizeCssFile, extractCriticalCss, updateCssReferences, makeStylesheetsAsync } from './optimizeCss.js';
 import { optimizeJsFile, addDeferToScripts, moveHeadScriptsToBody, updateJsReferences } from './optimizeJs.js';
@@ -16,6 +17,7 @@ export interface OptimizeOptions {
   assets: Map<string, AssetInfo>;
   workDir: string;
   siteUrl: string;
+  settings: OptimizationSettings;
   onPageProcessed?: (pageIndex: number) => Promise<void>;
 }
 
@@ -43,7 +45,7 @@ export interface OptimizeResult {
 }
 
 export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeResult> {
-  const { pages, assets, workDir, siteUrl, onPageProcessed } = options;
+  const { pages, assets, workDir, siteUrl, settings, onPageProcessed } = options;
 
   console.log(`[optimize] ========== OPTIMIZATION START ==========`);
   console.log(`[optimize] Pages: ${pages.length}, Assets: ${assets.size}`);
@@ -67,7 +69,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
 
   for (const [url, asset] of cssAssets) {
     try {
-      const result = await optimizeCssFile(asset.localPath, allHtmlContent, workDir);
+      const result = await optimizeCssFile(asset.localPath, allHtmlContent, workDir, settings);
       stats.css.originalBytes += result.originalBytes;
       stats.css.optimizedBytes += result.optimizedBytes;
       if (result.newPath && result.newPath !== asset.localPath) {
@@ -85,7 +87,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
 
   for (const [url, asset] of jsAssets) {
     try {
-      const result = await optimizeJsFile(asset.localPath, workDir);
+      const result = await optimizeJsFile(asset.localPath, workDir, settings);
       stats.js.originalBytes += result.originalBytes;
       stats.js.optimizedBytes += result.optimizedBytes;
       if (result.removed) stats.scriptsRemoved++;
@@ -104,7 +106,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
 
   for (const [url, asset] of imageAssets) {
     try {
-      const result = await optimizeImage(asset.localPath, workDir);
+      const result = await optimizeImage(asset.localPath, workDir, settings);
       stats.images.originalBytes += result.originalBytes;
       stats.images.optimizedBytes += result.optimizedBytes;
     } catch (err) {
@@ -134,14 +136,14 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
 
     // 4b. WordPress bloat removal (Cheerio-based)
     try {
-      html = await optimizeHtml(html);
+      html = await optimizeHtml(html, settings);
     } catch (err) {
       console.error(`[optimize] WP bloat removal failed for ${page.path}:`, (err as Error).message);
     }
 
     // 4c. Video facade replacement
     try {
-      const videoResult = await replaceVideoEmbeds(html, workDir);
+      const videoResult = await replaceVideoEmbeds(html, workDir, settings);
       html = videoResult.html;
       stats.facades.total += videoResult.facadesApplied;
     } catch (err) {
@@ -174,7 +176,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
 
     // 4g. Font optimization (self-host Google Fonts, preload)
     try {
-      const fontResult = await optimizeFonts(html, workDir);
+      const fontResult = await optimizeFonts(html, workDir, settings);
       html = fontResult.html;
     } catch (err) {
       console.error(`[optimize] Font optimization failed for ${page.path}:`, (err as Error).message);
@@ -231,15 +233,21 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
     try {
       const { minify: htmlMinify } = await import('html-minifier-terser');
       html = await htmlMinify(html, {
-        collapseWhitespace: true,
-        removeComments: true,
-        removeRedundantAttributes: true,
-        minifyCSS: true,
-        minifyJS: true,
-        sortAttributes: true,
-        collapseBooleanAttributes: true,
-        removeScriptTypeAttributes: true,
-        removeStyleLinkTypeAttributes: true,
+        collapseWhitespace: settings.html.safe.collapseWhitespace,
+        removeComments: settings.html.safe.removeComments,
+        removeRedundantAttributes: settings.html.safe.removeRedundantAttributes,
+        minifyCSS: settings.html.safe.minifyCSS,
+        minifyJS: settings.html.safe.minifyJS,
+        collapseBooleanAttributes: settings.html.safe.collapseBooleanAttributes,
+        removeScriptTypeAttributes: settings.html.safe.removeScriptTypeAttributes,
+        removeStyleLinkTypeAttributes: settings.html.safe.removeStyleLinkTypeAttributes,
+        decodeEntities: settings.html.safe.decodeEntities,
+        // Aggressive options
+        removeAttributeQuotes: settings.html.aggressive.removeAttributeQuotes,
+        removeOptionalTags: settings.html.aggressive.removeOptionalTags,
+        removeEmptyElements: settings.html.aggressive.removeEmptyElements,
+        sortAttributes: settings.html.aggressive.sortAttributes,
+        sortClassName: settings.html.aggressive.sortClassName,
       });
     } catch (err) {
       console.error(`[optimize] Final HTML minification failed for ${page.path}:`, (err as Error).message);
@@ -293,7 +301,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
 
   // ═══ STEP 6: Generate Cloudflare _headers file ═══
   console.log(`[optimize] Step 6: Generating _headers file...`);
-  await generateHeaders(outputDir);
+  await generateHeaders(outputDir, settings);
 
   console.log(`[optimize] ========== OPTIMIZATION COMPLETE ==========`);
   console.log(`[optimize] Total optimized bytes: ${totalOptimizedBytes}`);

@@ -2,15 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { minify } from 'terser';
 import { hashContent } from '../utils/crypto.js';
-
-// Known dead scripts that serve no purpose on static sites
-const DEAD_SCRIPT_PATTERNS = [
-  'wp-emoji-release.min.js',
-  'jquery-migrate.min.js',
-  'wp-embed.min.js',
-  'cart-fragments.min.js',
-  'wp-polyfill.min.js',
-];
+import type { OptimizationSettings } from '../shared/settingsSchema.js';
 
 export interface JsOptimizeResult {
   originalBytes: number;
@@ -20,11 +12,30 @@ export interface JsOptimizeResult {
 }
 
 /**
+ * Build the dead script patterns from settings.
+ */
+function getDeadScriptPatterns(settings?: OptimizationSettings): string[] {
+  const patterns: string[] = [];
+  const r = settings?.js.removeScripts;
+  if (!r || r.wpEmoji) patterns.push('wp-emoji-release.min.js');
+  if (!r || r.jqueryMigrate) patterns.push('jquery-migrate.min.js');
+  if (!r || r.wpEmbed) patterns.push('wp-embed.min.js');
+  if (!r || r.wpPolyfill) patterns.push('wp-polyfill.min.js');
+  if (!r || r.commentReply) patterns.push('comment-reply.min.js');
+  if (!r || r.hoverIntent) patterns.push('hoverintent-js.min.js');
+  if (!r || r.adminBar) patterns.push('admin-bar.js');
+  // Always remove cart fragments
+  patterns.push('cart-fragments.min.js');
+  return patterns;
+}
+
+/**
  * Optimize a JavaScript file with Terser minification + content-hash rename.
  */
 export async function optimizeJsFile(
   jsRelativePath: string,
-  workDir: string
+  workDir: string,
+  settings?: OptimizationSettings
 ): Promise<JsOptimizeResult> {
   const jsPath = path.join(workDir, jsRelativePath);
 
@@ -39,10 +50,18 @@ export async function optimizeJsFile(
   const filename = path.basename(jsPath);
 
   // Check if this is a known dead script
-  const isDead = DEAD_SCRIPT_PATTERNS.some(pattern => filename.includes(pattern));
+  const deadPatterns = getDeadScriptPatterns(settings);
+  const isDead = deadPatterns.some(pattern => filename.includes(pattern));
   if (isDead) {
     await fs.unlink(jsPath).catch(() => {});
     console.log(`[js] Removed dead script: ${jsRelativePath}`);
+    return { originalBytes, optimizedBytes: 0, removed: true };
+  }
+
+  // Check jQuery removal setting
+  if (settings?.js.removeJquery && filename.includes('jquery') && !filename.includes('jquery-migrate')) {
+    await fs.unlink(jsPath).catch(() => {});
+    console.log(`[js] Removed jQuery: ${jsRelativePath}`);
     return { originalBytes, optimizedBytes: 0, removed: true };
   }
 
@@ -50,10 +69,10 @@ export async function optimizeJsFile(
   try {
     const result = await minify(jsContent, {
       compress: {
-        passes: 3,
+        passes: settings?.js.terserPasses ?? 3,
         dead_code: true,
-        drop_console: true,
-        drop_debugger: true,
+        drop_console: settings?.js.dropConsole ?? true,
+        drop_debugger: settings?.js.dropDebugger ?? true,
         pure_getters: true,
         unsafe_math: true,
       },

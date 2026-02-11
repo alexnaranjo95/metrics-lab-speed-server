@@ -1,30 +1,32 @@
 import fs from 'fs/promises';
 import path from 'path';
 import * as cheerio from 'cheerio';
+import type { OptimizationSettings } from '../shared/settingsSchema.js';
 
 const CHROME_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 export interface FontOptimizeResult {
   fontsDownloaded: number;
-  fontFaceRules: string; // The rewritten @font-face CSS to inline
-  preloadTags: string[]; // <link rel="preload"> tags for critical fonts
+  fontFaceRules: string;
+  preloadTags: string[];
   removedGoogleFontLinks: number;
 }
 
 /**
- * Optimize Google Fonts: self-host, add font-display:swap, generate preloads.
- *
- * 1. Detect <link> tags pointing to fonts.googleapis.com
- * 2. Download the CSS (requesting woff2 format via UA)
- * 3. Parse @font-face rules, download each .woff2 file
- * 4. Save fonts to /assets/fonts/ in workDir
- * 5. Rewrite @font-face rules to point to local paths + font-display:swap
- * 6. Return rules to inline in <style> + preload tags for critical fonts
+ * Optimize Google Fonts: self-host, add font-display, generate preloads.
  */
 export async function optimizeFonts(
   html: string,
-  workDir: string
+  workDir: string,
+  settings?: OptimizationSettings
 ): Promise<{ html: string; result: FontOptimizeResult }> {
+  // Check if self-hosting is enabled
+  if (settings?.fonts.selfHostGoogleFonts === false) {
+    return {
+      html,
+      result: { fontsDownloaded: 0, fontFaceRules: '', preloadTags: [], removedGoogleFontLinks: 0 },
+    };
+  }
   const $ = cheerio.load(html);
   const googleFontLinks: Array<{ href: string; element: any }> = [];
 
@@ -69,13 +71,16 @@ export async function optimizeFonts(
       const cssText = await cssResponse.text();
 
       // Parse and download each font file
+      const fontDisplayValue = settings?.fonts.fontDisplay ?? 'swap';
       const rewrittenCss = await downloadAndRewriteFonts(
         cssText,
         fontsDir,
+        fontDisplayValue,
         (fontPath) => {
           fontsDownloaded++;
-          // Keep track of first 2 fonts for preloading
-          if (criticalFontPaths.length < 2) {
+          // Keep track of critical fonts for preloading
+          const maxPreloads = settings?.fonts.preloadCount ?? 2;
+          if (criticalFontPaths.length < maxPreloads) {
             criticalFontPaths.push(fontPath);
           }
         }
@@ -128,6 +133,7 @@ export async function optimizeFonts(
 async function downloadAndRewriteFonts(
   css: string,
   fontsDir: string,
+  fontDisplay: string,
   onDownload: (localPath: string) => void
 ): Promise<string> {
   // Match url(...) in @font-face rules
@@ -175,10 +181,10 @@ async function downloadAndRewriteFonts(
     rewrittenCss = rewrittenCss.split(originalUrl).join(localPath);
   }
 
-  // Inject font-display: swap into all @font-face rules
+  // Inject font-display into all @font-face rules
   rewrittenCss = rewrittenCss.replace(/@font-face\s*\{([^}]*)\}/gi, (match, body) => {
     if (/font-display\s*:/i.test(body)) return match;
-    return `@font-face{${body.trim()};font-display:swap}`;
+    return `@font-face{${body.trim()};font-display:${fontDisplay}}`;
   });
 
   return rewrittenCss;

@@ -1,11 +1,20 @@
+import path from 'path';
+import { fileURLToPath } from 'url';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import websocket from '@fastify/websocket';
+import fastifyStatic from '@fastify/static';
 import { config } from './config.js';
 import { runMigrations } from './db/index.js';
 import { siteRoutes } from './api/sites.js';
 import { buildRoutes } from './api/builds.js';
 import { webhookRoutes } from './api/webhooks.js';
+import { settingsRoutes } from './api/settings.js';
+import { websocketRoutes } from './api/websocket.js';
+import { buildLogRoutes } from './api/buildLogs.js';
 import { buildWorker } from './queue/buildWorker.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * Validate all required optimizer modules are installed.
@@ -66,16 +75,44 @@ async function start() {
     credentials: true,
   });
 
+  // WebSocket support
+  await app.register(websocket);
+
   // Health check
   app.get('/health', async () => ({
     status: 'ok',
     timestamp: new Date().toISOString(),
   }));
 
-  // Register routes
+  // Serve React SPA in production
+  const clientDistPath = path.join(__dirname, '../client/dist');
+  if (config.NODE_ENV === 'production') {
+    await app.register(fastifyStatic, {
+      root: clientDistPath,
+      prefix: '/',
+      wildcard: false,
+      maxAge: '1y',
+      immutable: true,
+    });
+  }
+
+  // Register API routes
+  await app.register(settingsRoutes, { prefix: '/api' });
   await app.register(siteRoutes, { prefix: '/api' });
   await app.register(buildRoutes, { prefix: '/api' });
+  await app.register(buildLogRoutes, { prefix: '/api' });
   await app.register(webhookRoutes, { prefix: '/webhooks' });
+  await app.register(websocketRoutes);
+
+  // SPA fallback: serve index.html for all non-API routes in production
+  if (config.NODE_ENV === 'production') {
+    app.setNotFoundHandler(async (req, reply) => {
+      if (req.url.startsWith('/api/') || req.url.startsWith('/ws/') || req.url.startsWith('/webhooks/')) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
+      return reply.sendFile('index.html');
+    });
+  }
 
   // Start server
   await app.listen({ port: config.PORT, host: '0.0.0.0' });

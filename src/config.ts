@@ -22,7 +22,7 @@ function intEnv(name: string, defaultValue: number): number {
 
 export const config = {
   // Server
-  PORT: intEnv('PORT', 3001),
+  PORT: intEnv('PORT', 3002),
   NODE_ENV: optionalEnv('NODE_ENV', 'development') as string,
   LOG_LEVEL: optionalEnv('LOG_LEVEL', 'info') as string,
 
