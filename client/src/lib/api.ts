@@ -60,10 +60,40 @@ export interface Build {
   createdAt: string;
 }
 
+export interface SiteWithBuild {
+  id: string;
+  name: string;
+  siteUrl: string;
+  status: string;
+  edgeUrl: string | null;
+  cloudflareProjectName: string | null;
+  pageCount: number | null;
+  totalSizeBytes: number | null;
+  lastBuild: {
+    id: string;
+    status: string;
+    startedAt: string | null;
+    completedAt: string | null;
+    originalSizeBytes: number | null;
+    optimizedSizeBytes: number | null;
+    lighthouseScoreBefore: number | null;
+    lighthouseScoreAfter: number | null;
+    errorMessage: string | null;
+  } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const api = {
   // Sites
+  listSites: () => fetchJson<{ sites: SiteWithBuild[] }>('/sites'),
   getSite: (siteId: string) => fetchJson<Site>(`/sites/${siteId}`),
   getSiteStatus: (siteId: string) => fetchJson<{ site: Site; latestBuild: Build | null }>(`/sites/${siteId}/status`),
+  createSite: (name: string, siteUrl: string) =>
+    fetchJson<{ id: string; name: string; site_url: string; webhookSecret: string }>('/sites', {
+      method: 'POST',
+      body: JSON.stringify({ name, site_url: siteUrl }),
+    }),
 
   // Builds
   getBuilds: (siteId: string, limit = 20, offset = 0) =>

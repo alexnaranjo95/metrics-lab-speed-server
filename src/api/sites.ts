@@ -13,6 +13,52 @@ export async function siteRoutes(app: FastifyInstance) {
   // All site routes require master key
   app.addHook('onRequest', requireMasterKey);
 
+  // ── GET /api/sites — List all sites ──
+  app.get('/sites', async (request, reply) => {
+    const allSites = await db.query.sites.findMany({
+      orderBy: (s, { desc }) => [desc(s.updatedAt)],
+    });
+
+    const sitesWithBuilds = await Promise.all(
+      allSites.map(async (site) => {
+        let lastBuild = null;
+        if (site.lastBuildId) {
+          const build = await db.query.builds.findFirst({
+            where: eq(builds.id, site.lastBuildId),
+          });
+          if (build) {
+            lastBuild = {
+              id: build.id,
+              status: build.status,
+              startedAt: build.startedAt,
+              completedAt: build.completedAt,
+              originalSizeBytes: build.originalSizeBytes,
+              optimizedSizeBytes: build.optimizedSizeBytes,
+              lighthouseScoreBefore: build.lighthouseScoreBefore,
+              lighthouseScoreAfter: build.lighthouseScoreAfter,
+              errorMessage: build.errorMessage,
+            };
+          }
+        }
+        return {
+          id: site.id,
+          name: site.name,
+          siteUrl: site.siteUrl,
+          status: site.status,
+          edgeUrl: site.edgeUrl,
+          cloudflareProjectName: site.cloudflareProjectName,
+          pageCount: site.pageCount,
+          totalSizeBytes: site.totalSizeBytes,
+          lastBuild,
+          createdAt: site.createdAt,
+          updatedAt: site.updatedAt,
+        };
+      })
+    );
+
+    return { sites: sitesWithBuilds };
+  });
+
   // ── POST /api/sites — Create a site ──
   app.post('/sites', async (request, reply) => {
     const body = request.body as { name?: string; site_url?: string };

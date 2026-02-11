@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Shell } from './components/layout/Shell';
 import { DashboardPage } from './pages/DashboardPage';
 import { SitePage } from './pages/SitePage';
+import { BuildHistoryPage } from './pages/BuildHistoryPage';
 import { BuildPage } from './pages/BuildPage';
 
 const queryClient = new QueryClient({
@@ -22,6 +23,7 @@ export default function App() {
           <Route element={<Shell />}>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/sites/:siteId" element={<SitePage />} />
+            <Route path="/sites/:siteId/builds" element={<BuildHistoryPage />} />
             <Route path="/sites/:siteId/builds/:buildId" element={<BuildPage />} />
           </Route>
         </Routes>
