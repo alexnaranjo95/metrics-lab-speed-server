@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import Fastify from 'fastify';
@@ -84,9 +85,16 @@ async function start() {
     timestamp: new Date().toISOString(),
   }));
 
-  // Serve React SPA in production
+  // Serve React SPA if client/dist exists (works in Docker and local builds)
   const clientDistPath = path.join(__dirname, '../client/dist');
-  if (config.NODE_ENV === 'production') {
+  const clientDistExists = fs.existsSync(path.join(clientDistPath, 'index.html'));
+
+  console.log(`SPA serving: ${clientDistExists ? 'ENABLED' : 'DISABLED (client/dist/index.html not found)'}`);
+  console.log(`NODE_ENV: ${config.NODE_ENV}`);
+  console.log(`Client dist path: ${clientDistPath}`);
+  console.log(`API key configured: ${config.MASTER_API_KEY !== 'dev_master_key_change_in_production' ? 'yes' : 'USING DEFAULT (check env vars!)'}`);
+
+  if (clientDistExists) {
     await app.register(fastifyStatic, {
       root: clientDistPath,
       prefix: '/',
@@ -104,8 +112,8 @@ async function start() {
   await app.register(webhookRoutes, { prefix: '/webhooks' });
   await app.register(websocketRoutes);
 
-  // SPA fallback: serve index.html for all non-API routes in production
-  if (config.NODE_ENV === 'production') {
+  // SPA fallback: serve index.html for all non-API, non-WS routes
+  if (clientDistExists) {
     app.setNotFoundHandler(async (req, reply) => {
       if (req.url.startsWith('/api/') || req.url.startsWith('/ws/') || req.url.startsWith('/webhooks/')) {
         return reply.code(404).send({ error: 'Not found' });

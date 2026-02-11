@@ -34,8 +34,10 @@ export const config = {
   REDIS_PORT: intEnv('REDIS_PORT', 6379),
   REDIS_PASSWORD: optionalEnv('REDIS_PASSWORD'),
 
-  // Authentication
-  MASTER_API_KEY: requireEnv('MASTER_API_KEY', 'dev_master_key_change_in_production'),
+  // Authentication (accept both MASTER_API_KEY and SPEED_BUILD_SERVER_MASTER_KEY for Coolify compat)
+  MASTER_API_KEY: requireEnv('MASTER_API_KEY',
+    process.env.SPEED_BUILD_SERVER_MASTER_KEY ?? 'dev_master_key_change_in_production'
+  ),
 
   // Cloudflare
   CLOUDFLARE_ACCOUNT_ID: optionalEnv('CLOUDFLARE_ACCOUNT_ID'),
