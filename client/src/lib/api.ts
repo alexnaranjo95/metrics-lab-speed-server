@@ -107,7 +107,7 @@ export const api = {
     }),
   cancelStaleBuilds: (siteId: string) =>
     fetchJson<{ cancelled: number; buildIds?: string[] }>(`/sites/${siteId}/builds/cancel-stale`, {
-      method: 'POST',
+      method: 'POST', body: '{}',
     }),
 
   // Settings
@@ -121,13 +121,13 @@ export const api = {
   getSettingsDiff: (siteId: string) =>
     fetchJson<{ diff: Record<string, any>; overrideCount: number }>(`/sites/${siteId}/settings/diff`),
   resetSettings: (siteId: string) =>
-    fetchJson<{ settings: any }>(`/sites/${siteId}/settings/reset`, { method: 'POST' }),
+    fetchJson<{ settings: any }>(`/sites/${siteId}/settings/reset`, { method: 'POST', body: '{}' }),
   getSettingsDefaults: (siteId: string) =>
     fetchJson<{ defaults: any }>(`/sites/${siteId}/settings/defaults`),
   getSettingsHistory: (siteId: string) =>
     fetchJson<{ history: Array<{ id: string; settings: any; changedBy: string; createdAt: string }> }>(`/sites/${siteId}/settings/history`),
   rollbackSettings: (siteId: string, historyId: string) =>
-    fetchJson<{ settings: any }>(`/sites/${siteId}/settings/rollback/${historyId}`, { method: 'POST' }),
+    fetchJson<{ settings: any }>(`/sites/${siteId}/settings/rollback/${historyId}`, { method: 'POST', body: '{}' }),
 
   // Asset overrides
   getAssetOverrides: (siteId: string) =>
@@ -156,11 +156,11 @@ export const api = {
 
   // AI Agent
   startAIOptimize: (siteId: string) =>
-    fetchJson<{ message: string; jobId: string; siteId: string }>(`/sites/${siteId}/ai/optimize`, { method: 'POST' }),
+    fetchJson<{ message: string; jobId: string; siteId: string }>(`/sites/${siteId}/ai/optimize`, { method: 'POST', body: '{}' }),
   getAgentStatus: (siteId: string) =>
     fetchJson<{ running: boolean; runId?: string; phase?: string; iteration?: number; maxIterations?: number; logCount?: number; recentLogs?: Array<{ timestamp: string; message: string }> }>(`/sites/${siteId}/ai/status`),
   getAgentReport: (siteId: string) =>
     fetchJson<{ report: any }>(`/sites/${siteId}/ai/report`),
   stopAgent: (siteId: string) =>
-    fetchJson<{ stopped: boolean }>(`/sites/${siteId}/ai/stop`, { method: 'POST' }),
+    fetchJson<{ stopped: boolean }>(`/sites/${siteId}/ai/stop`, { method: 'POST', body: '{}' }),
 };
