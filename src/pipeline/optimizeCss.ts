@@ -99,42 +99,19 @@ function injectFontDisplaySwap(css: string): string {
 }
 
 /**
- * Extract critical (above-the-fold) CSS from HTML + CSS content.
- * Uses the `critical` npm package.
- * Returns { criticalCss, remainingCss }.
+ * Make all CSS non-render-blocking by converting <link rel="stylesheet">
+ * to async loading pattern (media="print" onload="this.media='all'").
+ * This eliminates render-blocking CSS, which is the main Lighthouse win.
+ *
+ * Note: Previously used the `critical` npm package for above-the-fold
+ * extraction, but it depends on Puppeteer which crashes in Docker containers
+ * that only have Playwright's Chromium installed.
  */
 export async function extractCriticalCss(
   html: string,
-  cssContents: Array<{ path: string; css: string }>
+  _cssContents: Array<{ path: string; css: string }>
 ): Promise<{ criticalCss: string; html: string }> {
-  try {
-    // Dynamic import since `critical` is a CJS/ESM hybrid
-    const { generate } = await import('critical');
-
-    const result = await generate({
-      html,
-      css: cssContents.map(c => c.css).join('\n'),
-      width: 1300,
-      height: 900,
-      inline: true,  // Inline critical CSS + async load the rest
-      extract: false,
-      penthouse: {
-        timeout: 30000,
-      },
-    });
-
-    // `critical` with inline:true returns the modified HTML with:
-    // - Critical CSS in a <style> tag in <head>
-    // - Non-critical CSS loaded via <link rel="stylesheet" media="print" onload="this.media='all'">
-    const outputHtml = typeof result === 'string' ? result : result.html;
-    const criticalCss = typeof result === 'string' ? '' : (result.css || '');
-
-    return { criticalCss, html: outputHtml };
-  } catch (err) {
-    console.warn('[css] Critical CSS extraction failed (non-fatal):', (err as Error).message);
-    // Fallback: manually make stylesheets non-render-blocking
-    return { criticalCss: '', html: makeStylesheetsAsync(html) };
-  }
+  return { criticalCss: '', html: makeStylesheetsAsync(html) };
 }
 
 /**

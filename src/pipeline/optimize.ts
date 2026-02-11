@@ -125,51 +125,82 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
     let html = page.html;
 
     // 4a. Update CSS/JS references to content-hashed filenames
-    html = updateCssReferences(html, cssRenames);
-    html = updateJsReferences(html, jsRenames);
+    try {
+      html = updateCssReferences(html, cssRenames);
+      html = updateJsReferences(html, jsRenames);
+    } catch (err) {
+      console.error(`[optimize] CSS/JS reference update failed for ${page.path}:`, (err as Error).message);
+    }
 
     // 4b. WordPress bloat removal (Cheerio-based)
-    html = await optimizeHtml(html);
+    try {
+      html = await optimizeHtml(html);
+    } catch (err) {
+      console.error(`[optimize] WP bloat removal failed for ${page.path}:`, (err as Error).message);
+    }
 
     // 4c. Video facade replacement
-    const videoResult = await replaceVideoEmbeds(html, workDir);
-    html = videoResult.html;
-    stats.facades.total += videoResult.facadesApplied;
+    try {
+      const videoResult = await replaceVideoEmbeds(html, workDir);
+      html = videoResult.html;
+      stats.facades.total += videoResult.facadesApplied;
+    } catch (err) {
+      console.error(`[optimize] Video facade replacement failed for ${page.path}:`, (err as Error).message);
+    }
 
     // 4d. Widget facade replacement
-    const widgetResult = await replaceWidgetEmbeds(html);
-    html = widgetResult.html;
-    stats.facades.total += widgetResult.facadesApplied;
-    stats.scriptsRemoved += widgetResult.scriptsRemoved;
+    try {
+      const widgetResult = await replaceWidgetEmbeds(html);
+      html = widgetResult.html;
+      stats.facades.total += widgetResult.facadesApplied;
+      stats.scriptsRemoved += widgetResult.scriptsRemoved;
+    } catch (err) {
+      console.error(`[optimize] Widget facade replacement failed for ${page.path}:`, (err as Error).message);
+    }
 
     // 4e. Image tag rewriting (<picture>, lazy loading, fetchpriority)
-    html = rewriteImageTags(html, workDir);
+    try {
+      html = rewriteImageTags(html, workDir);
+    } catch (err) {
+      console.error(`[optimize] Image tag rewriting failed for ${page.path}:`, (err as Error).message);
+    }
 
     // 4f. Inject width/height on images for CLS prevention
-    html = await injectImageDimensions(html, workDir);
+    try {
+      html = await injectImageDimensions(html, workDir);
+    } catch (err) {
+      console.error(`[optimize] Image dimension injection failed for ${page.path}:`, (err as Error).message);
+    }
 
     // 4g. Font optimization (self-host Google Fonts, preload)
     try {
       const fontResult = await optimizeFonts(html, workDir);
       html = fontResult.html;
     } catch (err) {
-      console.warn(`[optimize] Font optimization failed for ${page.path}:`, (err as Error).message);
+      console.error(`[optimize] Font optimization failed for ${page.path}:`, (err as Error).message);
     }
 
     // 4h. Move inline scripts from <head> to end of <body>
-    html = moveHeadScriptsToBody(html);
+    try {
+      html = moveHeadScriptsToBody(html);
+    } catch (err) {
+      console.error(`[optimize] Script relocation failed for ${page.path}:`, (err as Error).message);
+    }
 
     // 4i. Add defer to ALL <script src> tags
-    html = addDeferToScripts(html);
+    try {
+      html = addDeferToScripts(html);
+    } catch (err) {
+      console.error(`[optimize] Script defer failed for ${page.path}:`, (err as Error).message);
+    }
 
-    // 4j. Critical CSS extraction + async loading of non-critical CSS
+    // 4j. Make stylesheets non-render-blocking (async loading)
     try {
       const cssFiles: Array<{ path: string; css: string }> = [];
       for (const [, asset] of assets) {
         if (asset.type === 'css') {
           try {
             const cssPath = path.join(workDir, asset.localPath);
-            // Try the hashed version first
             const hashedPath = cssRenames.get(asset.localPath);
             const actualPath = hashedPath ? path.join(workDir, hashedPath) : cssPath;
             const css = await fs.readFile(actualPath, 'utf-8');
@@ -181,19 +212,22 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       if (cssFiles.length > 0) {
         const critResult = await extractCriticalCss(html, cssFiles);
         html = critResult.html;
+      } else {
+        html = makeStylesheetsAsync(html);
       }
     } catch (err) {
-      console.warn(`[optimize] Critical CSS extraction failed for ${page.path}:`, (err as Error).message);
-      // Fallback: at least make stylesheets async
-      html = makeStylesheetsAsync(html);
+      console.error(`[optimize] Async CSS conversion failed for ${page.path}:`, (err as Error).message);
+      try { html = makeStylesheetsAsync(html); } catch { /* last resort */ }
     }
 
     // 4k. Resource hints (LCP preload, preconnect, cleanup)
-    html = injectResourceHints(html);
+    try {
+      html = injectResourceHints(html);
+    } catch (err) {
+      console.error(`[optimize] Resource hints injection failed for ${page.path}:`, (err as Error).message);
+    }
 
     // 4l. Final HTML minification (html-minifier-terser) — runs LAST
-    // Note: optimizeHtml already did minification, but we run the Cheerio output
-    // through html-minifier-terser again since subsequent steps added new HTML.
     try {
       const { minify: htmlMinify } = await import('html-minifier-terser');
       html = await htmlMinify(html, {
@@ -208,7 +242,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
         removeStyleLinkTypeAttributes: true,
       });
     } catch (err) {
-      console.warn(`[optimize] Final HTML minification failed for ${page.path}:`, (err as Error).message);
+      console.error(`[optimize] Final HTML minification failed for ${page.path}:`, (err as Error).message);
     }
 
     const optimizedSize = Buffer.byteLength(html, 'utf-8');

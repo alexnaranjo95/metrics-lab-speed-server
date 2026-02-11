@@ -108,11 +108,12 @@ export async function runBuildPipeline(
       );
     }
 
-    // ═══ PHASE 2: OPTIMIZE ═══
+    // ═══ PHASE 2: OPTIMIZE (with 10-minute timeout) ═══
     await updateBuildStatus(buildId, 'optimizing');
     await notifyDashboard(site, build, 'optimizing');
 
-    const optimizeResult = await optimizeAll({
+    const OPTIMIZE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+    const optimizePromise = optimizeAll({
       pages: crawlResult.pages,
       assets: crawlResult.assets,
       workDir,
@@ -121,6 +122,13 @@ export async function runBuildPipeline(
         await updateBuild(buildId, { pagesProcessed: pageIndex + 1 });
       },
     });
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(
+        `Optimization timed out after ${OPTIMIZE_TIMEOUT_MS / 60000} minutes. ` +
+        `The site may have too many pages or assets. Check [optimize] logs for the last step that ran.`
+      )), OPTIMIZE_TIMEOUT_MS);
+    });
+    const optimizeResult = await Promise.race([optimizePromise, timeoutPromise]);
 
     await updateBuild(buildId, {
       jsOriginalBytes: optimizeResult.stats.js.originalBytes,

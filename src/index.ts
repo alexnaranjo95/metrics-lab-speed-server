@@ -7,7 +7,43 @@ import { buildRoutes } from './api/builds.js';
 import { webhookRoutes } from './api/webhooks.js';
 import { buildWorker } from './queue/buildWorker.js';
 
+/**
+ * Validate all required optimizer modules are installed.
+ * If any are missing, log FATAL and exit so the container shows as unhealthy.
+ */
+async function validateDependencies() {
+  const REQUIRED_MODULES = [
+    'cheerio',
+    'html-minifier-terser',
+    'svgo',
+    'sharp',
+    'purgecss',
+    'clean-css',
+    'terser',
+  ];
+
+  const missing: string[] = [];
+  for (const mod of REQUIRED_MODULES) {
+    try {
+      await import(mod);
+    } catch {
+      missing.push(mod);
+    }
+  }
+
+  if (missing.length > 0) {
+    console.error(`FATAL: Missing optimizer dependencies: ${missing.join(', ')}`);
+    console.error('Add them to package.json and rebuild the Docker image.');
+    process.exit(1);
+  }
+
+  console.log(`Dependency validation passed (${REQUIRED_MODULES.length} modules OK)`);
+}
+
 async function start() {
+  // Validate optimizer dependencies before anything else
+  await validateDependencies();
+
   // Run database migrations
   try {
     await runMigrations();

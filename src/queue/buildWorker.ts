@@ -14,6 +14,8 @@ export const buildWorker = new Worker<BuildJobData>(
   {
     connection: redisConnectionOptions,
     concurrency: config.MAX_CONCURRENT_BUILDS,
+    lockDuration: 15 * 60 * 1000, // 15 minutes — auto-fail if worker stops heartbeating
+    stalledInterval: 2 * 60 * 1000, // Check for stalled jobs every 2 minutes
     limiter: {
       max: 5,
       duration: 60000,
