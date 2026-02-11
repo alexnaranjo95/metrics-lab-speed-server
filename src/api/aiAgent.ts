@@ -6,6 +6,7 @@ import { requireMasterKey } from '../middleware/auth.js';
 import { agentQueue } from '../queue/agentQueue.js';
 import { getAgentState, stopAgent } from '../ai/agent.js';
 import { isClaudeAvailable } from '../ai/claude.js';
+import { config } from '../config.js';
 import { buildEmitter } from '../events/buildEmitter.js';
 
 export const aiAgentRoutes: FastifyPluginAsync = async (app) => {
@@ -18,7 +19,17 @@ export const aiAgentRoutes: FastifyPluginAsync = async (app) => {
       const { siteId } = req.params;
 
       if (!isClaudeAvailable()) {
-        return reply.code(400).send({ error: 'ANTHROPIC_API_KEY not configured. Set it in environment variables.' });
+        // Debug: log what env vars are visible to help diagnose Coolify config
+        const anthropicEnvKeys = Object.keys(process.env).filter(k => k.toLowerCase().includes('anthrop') || k.toLowerCase().includes('claude') || k.toLowerCase().includes('api_key'));
+        console.error(`[AI_DEBUG] ANTHROPIC_API_KEY not found. config.ANTHROPIC_API_KEY=${config.ANTHROPIC_API_KEY === undefined ? 'undefined' : 'empty-string'}. process.env.ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY === undefined ? 'undefined' : `set(len=${process.env.ANTHROPIC_API_KEY.length})`}. Related env keys: ${JSON.stringify(anthropicEnvKeys)}`);
+        return reply.code(400).send({ 
+          error: 'ANTHROPIC_API_KEY not configured. Set it in environment variables.',
+          debug: {
+            configHasKey: config.ANTHROPIC_API_KEY !== undefined,
+            envHasKey: process.env.ANTHROPIC_API_KEY !== undefined,
+            relatedEnvKeys: anthropicEnvKeys,
+          }
+        });
       }
 
       const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
