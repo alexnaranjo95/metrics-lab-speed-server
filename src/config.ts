@@ -42,6 +42,9 @@ export const config = {
   // AI (Claude)
   ANTHROPIC_API_KEY: optionalEnv('ANTHROPIC_API_KEY') as string | undefined,
 
+  // Google PageSpeed Insights
+  PAGESPEED_API_KEY: optionalEnv('PAGESPEED_API_KEY') as string | undefined,
+
   // Cloudflare
   CLOUDFLARE_ACCOUNT_ID: optionalEnv('CLOUDFLARE_ACCOUNT_ID'),
   CLOUDFLARE_API_TOKEN: optionalEnv('CLOUDFLARE_API_TOKEN'),

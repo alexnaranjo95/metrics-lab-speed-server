@@ -6,7 +6,7 @@ import { sites, builds, pages as pagesTable, assetOverrides } from '../db/schema
 import { crawlSite } from './crawl.js';
 import { optimizeAll } from './optimize.js';
 import { deployToCloudflare } from './deploy.js';
-import { measurePerformance } from '../services/lighthouse.js';
+import { measureWithPageSpeed, isPageSpeedAvailable, type PageSpeedResult } from '../services/pagespeed.js';
 import { notifyDashboard } from '../services/dashboardNotifier.js';
 import { getCachedResolvedSettings } from '../shared/settingsMerge.js';
 import { buildEmitter } from '../events/buildEmitter.js';
@@ -194,18 +194,39 @@ export async function runBuildPipeline(
 
     // ═══ PHASE 4: MEASURE ═══
     buildEmitter.emitPhase(buildId, 'measure');
-    buildEmitter.log(buildId, 'measure', 'info', 'Running performance measurement...');
-    let originalScore = { performance: 0, ttfb: 0 };
-    let edgeScore = { performance: 0, ttfb: 0 };
+    const psiAvailable = isPageSpeedAvailable();
+    buildEmitter.log(buildId, 'measure', 'info',
+      `Running performance measurement${psiAvailable ? ' via PageSpeed Insights API' : ' via Playwright heuristic'}...`
+    );
+
+    let originalScore: PageSpeedResult = { performance: 0, lcp: 0, tbt: 0, cls: 0, fcp: 0, si: 0, ttfb: 0, strategy: 'mobile', opportunities: [], fieldData: null };
+    let edgeScore: PageSpeedResult = { ...originalScore };
 
     try {
+      // Run mobile measurements for both origin and edge
       [originalScore, edgeScore] = await Promise.all([
-        measurePerformance(site.siteUrl),
-        measurePerformance(deployResult.url),
+        measureWithPageSpeed(site.siteUrl, 'mobile'),
+        measureWithPageSpeed(deployResult.url, 'mobile'),
       ]);
-      buildEmitter.log(buildId, 'measure', 'info', `Lighthouse: ${originalScore.performance} → ${edgeScore.performance}`);
+
+      const fmtScore = (r: PageSpeedResult) =>
+        `Score ${r.performance}, LCP ${(r.lcp / 1000).toFixed(1)}s, TBT ${Math.round(r.tbt)}ms, CLS ${r.cls}, FCP ${(r.fcp / 1000).toFixed(1)}s, SI ${(r.si / 1000).toFixed(1)}s`;
+
+      buildEmitter.log(buildId, 'measure', 'info', `[measure] Origin: ${fmtScore(originalScore)}`);
+      buildEmitter.log(buildId, 'measure', 'info', `[measure] Edge:   ${fmtScore(edgeScore)}`);
+      buildEmitter.log(buildId, 'measure', 'info', `Performance: ${originalScore.performance} → ${edgeScore.performance}`);
+
+      // Also run desktop measurement (log only — for context)
+      if (psiAvailable) {
+        try {
+          const edgeDesktop = await measureWithPageSpeed(deployResult.url, 'desktop');
+          buildEmitter.log(buildId, 'measure', 'info', `[measure] Edge (desktop): ${fmtScore(edgeDesktop)}`);
+        } catch {
+          // Desktop measurement is non-critical
+        }
+      }
     } catch (err) {
-      buildEmitter.log(buildId, 'measure', 'warn', `Lighthouse measurement failed (non-fatal): ${(err as Error).message}`);
+      buildEmitter.log(buildId, 'measure', 'warn', `Performance measurement failed (non-fatal): ${(err as Error).message}`);
     }
 
     // ═══ PHASE 5: FINALIZE ═══
