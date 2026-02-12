@@ -31,7 +31,7 @@ export function AiBuildTab({ settings, defaults, diff, onChange }: Props) {
             <div className="flex items-center gap-2">
               <span className={cn('w-2.5 h-2.5 rounded-full', aiUsage.available ? 'bg-[hsl(var(--success))]' : 'bg-[hsl(var(--muted-foreground))]')} />
               <span className="text-sm font-medium">
-                {aiUsage.available ? 'Claude Opus 4.5 Connected' : 'Claude API Not Configured'}
+                {aiUsage.available ? 'Claude Opus 4.6 Connected' : 'Claude API Not Configured'}
               </span>
             </div>
             {!aiUsage.available && (
@@ -48,7 +48,7 @@ export function AiBuildTab({ settings, defaults, diff, onChange }: Props) {
         </div>
       )}
 
-      <SettingCard title="AI Optimization" description="Claude Opus 4.5 autonomous optimization agent. Use the 'AI Optimize' button on the site page to start.">
+      <SettingCard title="AI Optimization" description="Claude Opus 4.6 autonomous optimization agent. Use the 'AI Optimize' button on the site page to start.">
         <SettingField label="Enable AI Features" description="Controls whether AI features (alt text, meta descriptions, etc.) are included during agent runs" isOverridden={diff?.ai?.enabled}>
           <Toggle checked={settings.ai?.enabled ?? false} onChange={(v) => onChange('ai', { enabled: v })} />
         </SettingField>

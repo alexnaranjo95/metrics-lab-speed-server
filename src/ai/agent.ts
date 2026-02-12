@@ -96,7 +96,7 @@ export async function runOptimizationAgent(siteId: string): Promise<AgentReport>
     log('═══════════════════════════════════════════════');
     log('  METRICS LAB AI OPTIMIZATION AGENT');
     log(`  Site: ${domain}`);
-    log(`  Model: Claude Opus 4.5 (claude-opus-4.5-20250514)`);
+    log(`  Model: Claude Opus 4.6 (claude-opus-4.6-20250514)`);
     log(`  Max iterations: ${MAX_ITERATIONS}`);
     log('═══════════════════════════════════════════════');
 
