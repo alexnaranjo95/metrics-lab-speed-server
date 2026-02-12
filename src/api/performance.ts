@@ -9,7 +9,7 @@ import {
   alertLog,
 } from '../db/schema.js';
 import { requireMasterKey } from '../middleware/auth.js';
-import { calculateBusinessImpact } from '../services/pagespeed.js';
+import { calculateBusinessImpact, getLastPageSpeedResponse } from '../services/pagespeed.js';
 import { monitorQueue } from '../queue/monitorQueue.js';
 import { buildEmitter } from '../events/buildEmitter.js';
 import { nanoid } from 'nanoid';
@@ -68,6 +68,28 @@ function formatComparison(row: typeof performanceComparisons.$inferSelect) {
 
 export async function performanceRoutes(app: FastifyInstance) {
   app.addHook('onRequest', requireMasterKey);
+
+  // ── GET /performance/last-pagespeed-response — Last raw PageSpeed API JSON ──
+  app.get('/performance/last-pagespeed-response', async (request, reply) => {
+    const last = getLastPageSpeedResponse();
+    if (last === null) {
+      return reply.status(404).send({
+        error: 'No PageSpeed response saved yet',
+        hint: 'Run a build or performance test that uses the PageSpeed API; the last response is then saved to last-pagespeed-response.json',
+        apiEndpoint: 'GET /api/performance/last-pagespeed-response',
+        triggerMethods: [
+          'POST /api/sites/:siteId/performance/test (triggers PageSpeed test)',
+          'Run a site build that includes PageSpeed measurement',
+          'Any operation that calls measureWithPageSpeed() or fetchFullPageSpeedData()'
+        ]
+      });
+    }
+    return {
+      title: 'Last PageSpeed Insights API Response',
+      retrievedAt: new Date().toISOString(),
+      response: last
+    };
+  });
 
   // ── GET /comparison — Latest comparison (mobile + desktop) ──
   app.get('/sites/:siteId/performance/comparison', async (request, reply) => {

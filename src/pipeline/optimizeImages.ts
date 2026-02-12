@@ -13,29 +13,38 @@ export interface ImageOptimizeResult {
   webpPath?: string;
   avifPath?: string;
   responsivePaths?: string[];
+  isLCPCandidate?: boolean;
+  aspectRatio?: number;
+  compressionRatio?: number;
 }
 
 /**
  * Optimize a single image file with Sharp.
  * Creates WebP/AVIF variants and responsive sizes per settings.
+ * Enhanced for LCP optimization and comprehensive format support.
  */
 export async function optimizeImage(
   imageRelativePath: string,
   workDir: string,
-  settings?: OptimizationSettings
+  settings?: OptimizationSettings,
+  isLCPCandidate?: boolean
 ): Promise<ImageOptimizeResult> {
   // Derive quality settings from resolved settings or use defaults
   const imgs = settings?.images;
-  const JPEG_QUALITY = imgs?.jpeg?.quality ?? 80;
-  const PNG_QUALITY = imgs?.jpeg?.quality ?? 80;
-  const WEBP_QUALITY = imgs?.webp?.quality ?? 80;
-  const AVIF_QUALITY = imgs?.avif?.quality ?? 50;
+  
+  // Enhanced quality tiers based on image importance
+  const qualityTier = determineQualityTier(imageRelativePath, isLCPCandidate);
+  const JPEG_QUALITY = imgs?.jpeg?.quality ?? qualityTier.jpeg;
+  const PNG_QUALITY = imgs?.jpeg?.quality ?? qualityTier.png;
+  const WEBP_QUALITY = imgs?.webp?.quality ?? qualityTier.webp;
+  const AVIF_QUALITY = imgs?.avif?.quality ?? qualityTier.avif;
   const WEBP_EFFORT = imgs?.webp?.effort ?? 4;
-  const AVIF_EFFORT = imgs?.avif?.effort ?? 4;
-  const RESPONSIVE_WIDTHS = imgs?.breakpoints ?? [320, 640, 768, 1024, 1280, 1920];
+  const AVIF_EFFORT = imgs?.avif?.effort ?? (isLCPCandidate ? 6 : 4); // Higher effort for LCP images
+  
+  const RESPONSIVE_WIDTHS = imgs?.breakpoints ?? [400, 800, 1200, 1600];
   const MAX_WIDTH = imgs?.maxWidth ?? 2560;
   const convertToWebp = imgs?.convertToWebp ?? true;
-  const convertToAvif = imgs?.convertToAvif ?? false;
+  const convertToAvif = imgs?.convertToAvif ?? true; // Default to true for modern optimization
   const generateSrcset = imgs?.generateSrcset ?? true;
   const keepOriginalAsFallback = imgs?.keepOriginalAsFallback ?? true;
   const stripMetadata = imgs?.stripMetadata ?? true;
@@ -66,23 +75,27 @@ export async function optimizeImage(
   try {
     const metadata = await sharp(inputBuffer).metadata();
     const srcWidth = metadata.width || MAX_WIDTH;
+    const srcHeight = metadata.height || Math.round(srcWidth * 0.75);
+    const aspectRatio = srcHeight / srcWidth;
 
-    // Optimize the original format
+    // Optimize the original format with enhanced settings
     let optimizedBuffer = await optimizeByFormat(inputBuffer, ext, srcWidth, {
       jpegQuality: JPEG_QUALITY, pngQuality: PNG_QUALITY,
       webpQuality: WEBP_QUALITY, webpEffort: WEBP_EFFORT,
       avifQuality: AVIF_QUALITY, avifEffort: AVIF_EFFORT, maxWidth: MAX_WIDTH,
-      stripMetadata,
+      stripMetadata, isLCPCandidate,
     });
 
-    // Only use optimized if smaller
-    if (optimizedBuffer.length >= originalBytes) {
+    // Only use optimized if significantly smaller or same size for LCP images
+    const threshold = isLCPCandidate ? 1.0 : 0.95; // Less aggressive for LCP images
+    if (optimizedBuffer.length >= originalBytes * threshold) {
       optimizedBuffer = inputBuffer;
     } else {
       await fs.writeFile(imagePath, optimizedBuffer);
     }
 
     const optimizedBytes = Math.min(optimizedBuffer.length, originalBytes);
+    const compressionRatio = 1 - (optimizedBytes / originalBytes);
 
     // Generate WebP variant (only when convertToWebp)
     let webpPath: string | undefined;
@@ -99,19 +112,35 @@ export async function optimizeImage(
       } catch { /* non-fatal */ }
     }
 
-    // Generate AVIF variant (only when convertToAvif)
+    // Generate AVIF variant with enhanced optimization (50% smaller than JPEG)
     let avifPath: string | undefined;
     if (convertToAvif && ext !== '.avif') {
       try {
         let pipeline = sharp(inputBuffer)
           .resize({ width: Math.min(srcWidth, MAX_WIDTH), withoutEnlargement: true });
         if (stripMetadata) pipeline = pipeline.withMetadata({});
-        const avifBuffer = await pipeline
-          .avif({ quality: AVIF_QUALITY, effort: AVIF_EFFORT })
-          .toBuffer();
-        avifPath = imagePath.replace(/\.[^.]+$/, '.avif');
-        await fs.writeFile(avifPath, avifBuffer);
-      } catch { /* non-fatal */ }
+        
+        // Enhanced AVIF settings for maximum compression
+        const avifOptions: any = { 
+          quality: AVIF_QUALITY, 
+          effort: AVIF_EFFORT,
+        };
+        
+        // Use lossless for very small images or when quality is critical
+        if (originalBytes < 50000 && isLCPCandidate) {
+          avifOptions.lossless = true;
+        }
+        
+        const avifBuffer = await pipeline.avif(avifOptions).toBuffer();
+        
+        // Only save AVIF if it's significantly smaller
+        if (avifBuffer.length < originalBytes * 0.7) {
+          avifPath = imagePath.replace(/\.[^.]+$/, '.avif');
+          await fs.writeFile(avifPath, avifBuffer);
+        }
+      } catch (error) {
+        console.warn(`[images] AVIF generation failed for ${imageRelativePath}:`, (error as Error).message);
+      }
     }
 
     // Generate responsive sizes (only when generateSrcset and convertToWebp)
@@ -140,7 +169,16 @@ export async function optimizeImage(
       } catch { /* non-fatal */ }
     }
 
-    return { originalBytes, optimizedBytes, webpPath, avifPath, responsivePaths };
+    return { 
+      originalBytes, 
+      optimizedBytes, 
+      webpPath, 
+      avifPath, 
+      responsivePaths,
+      isLCPCandidate,
+      aspectRatio,
+      compressionRatio,
+    };
   } catch (err) {
     console.warn(`[images] Optimization failed for ${imageRelativePath}:`, (err as Error).message);
     return { originalBytes, optimizedBytes: originalBytes };
@@ -153,6 +191,7 @@ interface FormatOptions {
   avifQuality: number; avifEffort: number;
   maxWidth: number;
   stripMetadata: boolean;
+  isLCPCandidate?: boolean;
 }
 
 async function optimizeByFormat(input: Buffer, ext: string, srcWidth: number, opts: FormatOptions): Promise<Buffer> {
@@ -162,16 +201,74 @@ async function optimizeByFormat(input: Buffer, ext: string, srcWidth: number, op
   switch (ext) {
     case '.jpg':
     case '.jpeg':
-      return pipeline.jpeg({ quality: opts.jpegQuality, progressive: true, mozjpeg: true }).toBuffer();
+      // Enhanced JPEG optimization with progressive loading for LCP images
+      return pipeline.jpeg({ 
+        quality: opts.jpegQuality, 
+        progressive: true, 
+        mozjpeg: true,
+        optimizeScans: opts.isLCPCandidate, // Better compression for LCP images
+      }).toBuffer();
     case '.png':
-      return pipeline.png({ quality: opts.pngQuality, compressionLevel: 9 }).toBuffer();
+      // Enhanced PNG optimization
+      return pipeline.png({ 
+        quality: opts.pngQuality, 
+        compressionLevel: 9,
+        adaptiveFiltering: true,
+        palette: opts.isLCPCandidate ? false : true, // Preserve quality for LCP
+      }).toBuffer();
     case '.webp':
-      return pipeline.webp({ quality: opts.webpQuality, effort: opts.webpEffort }).toBuffer();
+      return pipeline.webp({ 
+        quality: opts.webpQuality, 
+        effort: opts.webpEffort,
+        nearLossless: opts.isLCPCandidate && opts.webpQuality > 90,
+      }).toBuffer();
     case '.avif':
-      return pipeline.avif({ quality: opts.avifQuality, effort: opts.avifEffort }).toBuffer();
+      return pipeline.avif({ 
+        quality: opts.avifQuality, 
+        effort: opts.avifEffort,
+        chromaSubsampling: '4:2:0', // Better compression
+      }).toBuffer();
     default:
       return input;
   }
+}
+
+/**
+ * Determine quality tier based on image importance and use case
+ */
+function determineQualityTier(imagePath: string, isLCPCandidate?: boolean): {
+  jpeg: number;
+  png: number;
+  webp: number;
+  avif: number;
+} {
+  // LCP images get highest quality (Hero tier)
+  if (isLCPCandidate) {
+    return {
+      jpeg: 88,
+      png: 85,
+      webp: 85,
+      avif: 60,
+    };
+  }
+
+  // Thumbnail/small images can use lower quality
+  if (imagePath.includes('thumb') || imagePath.includes('small') || imagePath.includes('icon')) {
+    return {
+      jpeg: 65,
+      png: 70,
+      webp: 70,
+      avif: 40,
+    };
+  }
+
+  // Standard quality for most images
+  return {
+    jpeg: 78,
+    png: 80,
+    webp: 80,
+    avif: 50,
+  };
 }
 
 async function optimizeSvg(imagePath: string, inputBuffer: Buffer, enabled: boolean): Promise<ImageOptimizeResult> {
@@ -394,4 +491,220 @@ export async function injectImageDimensions(html: string, workDir: string): Prom
   }
 
   return html;
+}
+
+/**
+ * Enhanced image rewriting with modern picture element and LCP optimization
+ */
+export function rewriteImageTagsAdvanced(
+  html: string,
+  workDir: string,
+  lcpImages: string[] = [],
+  settings?: OptimizationSettings
+): string {
+  const imgs = settings?.images;
+  const opts: ImageRewriteSettings = imgs
+    ? {
+        convertToWebp: imgs.convertToWebp ?? true,
+        convertToAvif: imgs.convertToAvif ?? true, // Default to true
+        keepOriginalAsFallback: imgs.keepOriginalAsFallback ?? true,
+        generateSrcset: imgs.generateSrcset ?? true,
+        breakpoints: imgs.breakpoints ?? [400, 800, 1200, 1600],
+        lazyLoadEnabled: imgs.lazyLoadEnabled ?? true,
+        lazyLoadMargin: imgs.lazyLoadMargin ?? 200,
+        lcpDetection: imgs.lcpDetection ?? 'auto',
+        lcpImageSelector: imgs.lcpImageSelector,
+        lcpImageFetchPriority: imgs.lcpImageFetchPriority ?? true,
+      }
+    : {
+        ...DEFAULT_IMAGE_REWRITE,
+        convertToAvif: true,
+        breakpoints: [400, 800, 1200, 1600],
+      };
+
+  let imgIndex = 0;
+  let lcpFound = false;
+
+  html = html.replace(
+    /<img\s([^>]*?)src=["']([^"']+)["']([^>]*?)>/gi,
+    (match, before, src, after) => {
+      imgIndex++;
+
+      const ext = path.extname(src).toLowerCase();
+      const isRaster = ['.jpg', '.jpeg', '.png', '.webp', '.avif'].includes(ext);
+
+      // Check if this is an LCP candidate
+      const isLCPCandidate = !lcpFound && (
+        lcpImages.includes(src) || // Explicitly marked as LCP
+        (opts.lcpDetection === 'auto' && imgIndex <= 2) || // First 2 images
+        (before + after).includes('hero') || 
+        (before + after).includes('banner') ||
+        (before + after).includes('featured')
+      );
+      
+      if (isLCPCandidate) lcpFound = true;
+
+      if (!isRaster) {
+        return addLoadingAttrs(
+          match, before, after,
+          opts.lazyLoadEnabled,
+          opts.lcpImageFetchPriority && isLCPCandidate
+        );
+      }
+
+      const useLazy = opts.lazyLoadEnabled && !isLCPCandidate;
+      const loadingAttrs = [];
+      
+      if (isLCPCandidate && opts.lcpImageFetchPriority) {
+        loadingAttrs.push('loading="eager"', 'fetchpriority="high"', 'decoding="sync"');
+      } else if (useLazy) {
+        loadingAttrs.push('loading="lazy"', 'decoding="async"');
+      } else {
+        loadingAttrs.push('decoding="async"');
+      }
+
+      const cleanBefore = before.replace(/\s*(loading|decoding|fetchpriority)=["'][^"']*["']/gi, '');
+      const cleanAfter = after.replace(/\s*(loading|decoding|fetchpriority)=["'][^"']*["']/gi, '');
+
+      const basePath = src.replace(/\.[^.]+$/, '');
+      const avifSrc = `${basePath}.avif`;
+      const webpSrc = `${basePath}.webp`;
+
+      const usePicture = opts.convertToWebp || opts.convertToAvif;
+      if (!usePicture) {
+        const attrs = loadingAttrs.join(' ');
+        return `<img ${cleanBefore}src="${src}"${cleanAfter}${attrs ? ` ${attrs}` : ''}>`;
+      }
+
+      const fallbackSrc = opts.keepOriginalAsFallback ? src : (opts.convertToWebp ? webpSrc : src);
+
+      // Build picture element with AVIF priority
+      const sources = [];
+      
+      if (opts.convertToAvif) {
+        const avifSrcset = opts.generateSrcset 
+          ? opts.breakpoints
+              .map((w) => `${basePath}-${w}w.avif ${w}w`)
+              .concat(`${avifSrc} 1600w`)
+              .join(', ')
+          : avifSrc;
+        sources.push(`<source srcset="${avifSrcset}" type="image/avif">`);
+      }
+      
+      if (opts.convertToWebp) {
+        const webpSrcset = opts.generateSrcset 
+          ? opts.breakpoints
+              .map((w) => `${basePath}-${w}w.webp ${w}w`)
+              .concat(`${webpSrc} 1600w`)
+              .join(', ')
+          : webpSrc;
+        sources.push(`<source srcset="${webpSrcset}" type="image/webp">`);
+      }
+
+      const sizesAttr = opts.generateSrcset 
+        ? ' sizes="(max-width: 600px) 100vw, (max-width: 1200px) 80vw, 1200px"'
+        : '';
+
+      const attrs = loadingAttrs.join(' ');
+      const imgTag = `<img ${cleanBefore}src="${fallbackSrc}"${cleanAfter}${attrs ? ` ${attrs}` : ''}${sizesAttr}>`;
+      
+      return `<picture>${sources.join('')}${imgTag}</picture>`;
+    }
+  );
+
+  return html;
+}
+
+/**
+ * Detect LCP image candidates from HTML content
+ */
+export function detectLCPImageCandidates(html: string): string[] {
+  const candidates: string[] = [];
+  
+  // Hero/banner image patterns
+  const heroPatterns = [
+    /<img[^>]*class="[^"]*(?:hero|banner|featured|main)[^"]*"[^>]*src=["']([^"']+)["']/gi,
+    /<img[^>]*(?:id="[^"]*(?:hero|banner|featured)[^"]*")[^>]*src=["']([^"']+)["']/gi,
+  ];
+  
+  heroPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(html)) !== null) {
+      candidates.push(match[1]);
+    }
+  });
+  
+  // First images in content (likely above fold)
+  const imgMatches = html.matchAll(/<img[^>]*src=["']([^"']+)["']/gi);
+  let count = 0;
+  for (const match of imgMatches) {
+    if (count >= 3) break; // Top 3 images are LCP candidates
+    if (!candidates.includes(match[1])) {
+      candidates.push(match[1]);
+    }
+    count++;
+  }
+  
+  return candidates;
+}
+
+/**
+ * Generate preload links for critical images (LCP images)
+ */
+export function generateImagePreloadLinks(lcpImages: string[]): string {
+  return lcpImages
+    .slice(0, 2) // Only preload top 2 LCP candidates
+    .map(src => {
+      const ext = path.extname(src).toLowerCase();
+      const basePath = src.replace(/\.[^.]+$/, '');
+      
+      // Preload modern format if available, fallback to original
+      const avifSrc = `${basePath}.avif`;
+      const webpSrc = `${basePath}.webp`;
+      
+      return `<link rel="preload" as="image" href="${avifSrc}" type="image/avif">
+<link rel="preload" as="image" href="${webpSrc}" type="image/webp">
+<link rel="preload" as="image" href="${src}">`;
+    })
+    .join('\n');
+}
+
+/**
+ * Calculate image optimization savings and performance impact
+ */
+export function calculateImageOptimizationMetrics(results: ImageOptimizeResult[]): {
+  totalOriginalBytes: number;
+  totalOptimizedBytes: number;
+  totalSavings: number;
+  savingsPercentage: number;
+  avifSavings: number;
+  webpSavings: number;
+  estimatedLCPImprovement: number;
+} {
+  const totalOriginal = results.reduce((sum, r) => sum + r.originalBytes, 0);
+  const totalOptimized = results.reduce((sum, r) => sum + r.optimizedBytes, 0);
+  const totalSavings = totalOriginal - totalOptimized;
+  const savingsPercentage = totalOriginal > 0 ? (totalSavings / totalOriginal) * 100 : 0;
+  
+  // Estimate AVIF and WebP specific savings (AVIF ~50% smaller, WebP ~25% smaller than JPEG)
+  const avifImages = results.filter(r => r.avifPath);
+  const avifSavings = avifImages.reduce((sum, r) => sum + r.originalBytes * 0.5, 0);
+  
+  const webpImages = results.filter(r => r.webpPath);
+  const webpSavings = webpImages.reduce((sum, r) => sum + r.originalBytes * 0.25, 0);
+  
+  // Estimate LCP improvement based on LCP image optimizations
+  const lcpImages = results.filter(r => r.isLCPCandidate);
+  const lcpSavings = lcpImages.reduce((sum, r) => sum + (r.originalBytes - r.optimizedBytes), 0);
+  const estimatedLCPImprovement = Math.min(1000, lcpSavings / 1000); // ~1ms improvement per KB saved
+  
+  return {
+    totalOriginalBytes: totalOriginal,
+    totalOptimizedBytes: totalOptimized,
+    totalSavings,
+    savingsPercentage,
+    avifSavings,
+    webpSavings,
+    estimatedLCPImprovement,
+  };
 }

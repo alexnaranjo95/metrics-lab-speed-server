@@ -15,6 +15,7 @@ import { compareVisuals } from '../verification/visual.js';
 import { verifyFunctionalBehavior } from '../verification/functional.js';
 import { verifyAllLinks } from '../verification/links.js';
 import { measurePerformanceAll } from '../verification/performance.js';
+import { verifyPageSpeedOptimizations } from '../verification/pagespeed.js';
 import type { SiteInventory, IterationResult, AgentReport, AgentPhase } from './types.js';
 
 const MAX_ITERATIONS = 10;
@@ -96,7 +97,7 @@ export async function runOptimizationAgent(siteId: string): Promise<AgentReport>
     log('═══════════════════════════════════════════════');
     log('  METRICS LAB AI OPTIMIZATION AGENT');
     log(`  Site: ${domain}`);
-    log(`  Model: Claude Opus 4.6 (claude-opus-4.6-20250514)`);
+    log(`  Model: Claude Opus 4.6 (claude-opus-4-6)`);
     log(`  Max iterations: ${MAX_ITERATIONS}`);
     log('═══════════════════════════════════════════════');
 
@@ -224,10 +225,18 @@ export async function runOptimizationAgent(siteId: string): Promise<AgentReport>
         const worstPerf = perfResults.length > 0 ? Math.min(...perfResults.map(p => p.performance)) : 0;
         log(`Performance: avg ${avgPerf.toFixed(0)}, worst ${worstPerf}`);
 
+        log('PageSpeed optimization verification...');
+        const pageSpeedResults = await verifyPageSpeedOptimizations(edgeUrl, site.siteUrl, log);
+        const psPassed = pageSpeedResults.passed;
+        const psFailed = pageSpeedResults.failed;
+        const psOverallScore = Math.round((pageSpeedResults.overallScore.performance + pageSpeedResults.overallScore.seo + pageSpeedResults.overallScore.bestPractices) / 3);
+        log(`PageSpeed: ${psPassed}/${pageSpeedResults.totalTests} tests passed, overall score ${psOverallScore}/100`);
+
         const iterResult: IterationResult = {
           iteration, settings: currentSettings, buildId, edgeUrl,
           performance: perfResults, visualComparisons: visualResults,
           functionalTests: funcResults, linkVerification: linkResults,
+          pageSpeedVerification: pageSpeedResults,
         };
         iterationHistory.push(iterResult);
 
@@ -235,19 +244,21 @@ export async function runOptimizationAgent(siteId: string): Promise<AgentReport>
         const allVisualPass = visFailed === 0;
         const allFuncPass = fFailed === 0;
         const allLinksPass = lFailed === 0;
+        const pageSpeedPass = psFailed === 0 || psOverallScore >= 85; // Pass if no failures or good overall score
 
-        if (allVisualPass && allFuncPass && allLinksPass) {
+        if (allVisualPass && allFuncPass && allLinksPass && pageSpeedPass) {
           log('\nALL CHECKS PASSED!');
           log(`  Visual: All pages match original`);
           log(`  Functional: All ${fPassed} interactive elements work`);
           log(`  Links: All valid`);
           log(`  Performance: Avg ${avgPerf.toFixed(0)}, worst ${worstPerf}`);
+          log(`  PageSpeed: ${psPassed}/${pageSpeedResults.totalTests} optimizations verified, score ${psOverallScore}/100`);
           finalVerdict = 'pass';
           break;
         }
 
-        if (allVisualPass && allFuncPass && allLinksPass && avgPerf >= 80) {
-          log('Visual + Functional + Links pass. Performance acceptable.');
+        if (allVisualPass && allFuncPass && allLinksPass && avgPerf >= 80 && psOverallScore >= 75) {
+          log('Visual + Functional + Links + PageSpeed pass. Performance acceptable.');
           finalVerdict = 'pass';
           break;
         }

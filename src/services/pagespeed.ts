@@ -1,8 +1,35 @@
+import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { config } from '../config.js';
 import { measurePerformance as measureWithPlaywright } from './lighthouse.js';
 import { extractCompletePageSpeedData } from './pagespeed/extractor.js';
 import type { RawPageSpeedResponse } from './pagespeed/types.js';
 import type { OptimizationWorkflow } from './pagespeed/types.js';
+
+/** Path for the last raw PageSpeed API response (for debugging / inspection). */
+export const LAST_PAGESPEED_RESPONSE_PATH = join(process.cwd(), 'last-pagespeed-response.json');
+
+function saveLastPageSpeedResponse(data: unknown, url: string, strategy: string): void {
+  try {
+    const payload = { url, strategy, fetchedAt: new Date().toISOString(), ...(data as object) };
+    writeFileSync(LAST_PAGESPEED_RESPONSE_PATH, JSON.stringify(payload, null, 2), 'utf8');
+  } catch {
+    // ignore write errors
+  }
+}
+
+/**
+ * Return the last raw JSON saved from a PageSpeed API run, or null if none exists.
+ */
+export function getLastPageSpeedResponse(): unknown | null {
+  if (!existsSync(LAST_PAGESPEED_RESPONSE_PATH)) return null;
+  try {
+    const raw = readFileSync(LAST_PAGESPEED_RESPONSE_PATH, 'utf8');
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+}
 
 export type { OptimizationWorkflow } from './pagespeed/types.js';
 
@@ -56,6 +83,7 @@ export async function fetchFullPageSpeedData(
 
     if (!response.ok) return null;
     const data: RawPageSpeedResponse = await response.json();
+    saveLastPageSpeedResponse(data, url, strategy);
 
     if (!data.lighthouseResult) return null;
 
@@ -102,6 +130,7 @@ export async function measureWithPageSpeed(
     }
 
     const data = await response.json();
+    saveLastPageSpeedResponse(data, url, strategy);
     return extractMetrics(data, strategy);
 
   } catch (err) {

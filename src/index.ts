@@ -15,6 +15,9 @@ import { websocketRoutes } from './api/websocket.js';
 import { buildLogRoutes } from './api/buildLogs.js';
 import { aiAgentRoutes } from './api/aiAgent.js';
 import { performanceRoutes } from './api/performance.js';
+import { documentationRoutes } from './documentation/index.js';
+import { aiLearningRoutes } from './api/aiLearning.js';
+import { initializeLearningIntegration, scheduleContinuousLearning } from './ai/learningIntegration.js';
 import { buildWorker } from './queue/buildWorker.js';
 import { agentWorker } from './queue/agentWorker.js';
 import { monitorWorker, setupMonitorSchedule } from './queue/monitorQueue.js';
@@ -116,6 +119,8 @@ async function start() {
   await app.register(buildRoutes, { prefix: '/api' });
   await app.register(buildLogRoutes, { prefix: '/api' });
   await app.register(performanceRoutes, { prefix: '/api' });
+  await app.register(documentationRoutes, { prefix: '/api' });
+  await app.register(aiLearningRoutes, { prefix: '/api' });
   await app.register(webhookRoutes, { prefix: '/webhooks' });
   await app.register(websocketRoutes);
 
@@ -132,6 +137,16 @@ async function start() {
   // Set up performance monitoring schedule
   await setupMonitorSchedule().catch(err => {
     console.warn('Monitor schedule setup failed (continuing):', (err as Error).message);
+  });
+
+  // Initialize AI learning integration
+  await initializeLearningIntegration().catch(err => {
+    console.warn('Learning integration setup failed (continuing):', (err as Error).message);
+  });
+
+  // Schedule continuous learning
+  await scheduleContinuousLearning().catch(err => {
+    console.warn('Continuous learning schedule failed (continuing):', (err as Error).message);
   });
 
   // Start server

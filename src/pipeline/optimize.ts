@@ -6,12 +6,14 @@ import { buildEmitter } from '../events/buildEmitter.js';
 import { optimizeHtml } from './optimizeHtml.js';
 import { optimizeCssFile, extractCriticalCss, updateCssReferences, makeStylesheetsAsync } from './optimizeCss.js';
 import { optimizeJsFile, addDeferToScripts, moveHeadScriptsToBody, updateJsReferences } from './optimizeJs.js';
-import { optimizeImage, rewriteImageTags, injectImageDimensions } from './optimizeImages.js';
+import { optimizeImage, rewriteImageTags, injectImageDimensions, detectLCPImageCandidates } from './optimizeImages.js';
 import { replaceVideoEmbeds } from './videoFacades.js';
 import { replaceWidgetEmbeds } from './widgetFacades.js';
 import { optimizeFonts } from './optimizeFonts.js';
 import { injectResourceHints } from './resourceHints.js';
 import { generateHeaders } from './headersGenerator.js';
+import { optimizeCLS } from './optimizeCLS.js';
+import { optimizeSEO } from './optimizeSEO.js';
 
 export interface OptimizeOptions {
   pages: CrawledPage[];
@@ -220,6 +222,46 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       }
     } else if (i === 0) {
       console.log(`[html] HTML optimization disabled — skipping`);
+    }
+
+    // 4b2. CLS Optimization - Prevent layout shifts
+    if (settings.cls?.enabled !== false) {
+      try {
+        if (i === 0) {
+          const cls = settings.cls || {};
+          emit('html', 'info', `CLS: dimensions=${cls.imageDimensionInjection}, fontDisplay=${cls.fontDisplayStrategy}, dynamicContent=${cls.dynamicContentReservation}, layoutContainment=${cls.enableLayoutContainment}`);
+          console.log(`[optimize] CLS settings: dimensions=${cls.imageDimensionInjection}, fontDisplay=${cls.fontDisplayStrategy}, dynamicContent=${cls.dynamicContentReservation}, layoutContainment=${cls.enableLayoutContainment}`);
+        }
+        const clsResult = await optimizeCLS(html, workDir, settings);
+        html = clsResult.html;
+        if (i === 0) {
+          const r = clsResult.result;
+          emit('html', 'info', `CLS optimization: ${r.imagesDimensionsInjected} images fixed, ${r.fontsOptimized} fonts optimized, ${r.dynamicContentContainersReserved} containers reserved, estimated improvement: ${r.estimatedCLSImprovement.toFixed(3)}`);
+          console.log(`[optimize] CLS results: ${r.imagesDimensionsInjected} images fixed, ${r.fontsOptimized} fonts optimized, ${r.dynamicContentContainersReserved} containers reserved, est. improvement: ${r.estimatedCLSImprovement.toFixed(3)}`);
+        }
+      } catch (err) {
+        console.error(`[optimize] CLS optimization failed for ${page.path}:`, (err as Error).message);
+      }
+    }
+
+    // 4b3. SEO Optimization - Comprehensive SEO improvements
+    if (settings.seo?.enabled !== false) {
+      try {
+        if (i === 0) {
+          const seo = settings.seo || {};
+          emit('html', 'info', `SEO: altText=${seo.autoGenerateAltText}, metaTags=${seo.metaTagInjection}, structuredData=${seo.structuredDataInjection}, linkOptim=${seo.linkTextOptimization}`);
+          console.log(`[optimize] SEO settings: altText=${seo.autoGenerateAltText}, metaTags=${seo.metaTagInjection}, structuredData=${seo.structuredDataInjection}, linkOptim=${seo.linkTextOptimization}`);
+        }
+        const seoResult = await optimizeSEO(html, { ...settings, seo: settings.seo });
+        html = seoResult.html;
+        if (i === 0) {
+          const r = seoResult.result;
+          emit('html', 'info', `SEO optimization: ${r.metaTagsInjected} meta tags, ${r.altAttributesAdded} alt attributes, ${r.linksOptimized} links optimized, estimated score: ${r.estimatedSEOScoreAfter}/100`);
+          console.log(`[optimize] SEO results: ${r.metaTagsInjected} meta tags, ${r.altAttributesAdded} alt attributes, ${r.linksOptimized} links optimized, est. score: ${r.estimatedSEOScoreAfter}/100`);
+        }
+      } catch (err) {
+        console.error(`[optimize] SEO optimization failed for ${page.path}:`, (err as Error).message);
+      }
     }
 
     // 4c. Video facade replacement

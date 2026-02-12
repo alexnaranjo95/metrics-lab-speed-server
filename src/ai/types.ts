@@ -200,6 +200,7 @@ export interface IterationResult {
   visualComparisons: VisualComparisonResult[];
   functionalTests: FunctionalTestResult[];
   linkVerification: LinkVerificationResult[];
+  pageSpeedVerification?: import('../verification/pagespeed.js').PageSpeedVerificationSummary;
 }
 
 export interface AIReviewDecision {

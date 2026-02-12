@@ -334,6 +334,94 @@ const buildSettingsSchema = z.object({
   autoDeployOnSuccess: z.boolean().default(true),
 });
 
+// ─── CLS Optimization Settings ────────────────────────────────────
+
+const clsSettingsSchema = z.object({
+  enabled: z.boolean().default(true),
+  imageDimensionInjection: z.boolean().default(true),
+  fontDisplayStrategy: z.enum(['optional', 'swap', 'fallback', 'block']).default('optional'),
+  dynamicContentReservation: z.boolean().default(true),
+  enableLayoutContainment: z.boolean().default(true),
+  addResponsiveCSS: z.boolean().default(true),
+  preventFontLoaderShifts: z.boolean().default(true),
+  reserveAdSpace: z.boolean().default(true),
+  cookieBannerOptimization: z.boolean().default(true),
+});
+
+// ─── SEO Optimization Settings ─────────────────────────────────────
+
+const seoSettingsSchema = z.object({
+  enabled: z.boolean().default(true),
+  autoGenerateAltText: z.boolean().default(true),
+  metaTagInjection: z.boolean().default(true),
+  structuredDataInjection: z.boolean().default(true),
+  openGraphTags: z.boolean().default(true),
+  twitterCardMeta: z.boolean().default(true),
+  canonicalUrlGeneration: z.boolean().default(true),
+  robotsMetaOptimization: z.boolean().default(true),
+  linkTextOptimization: z.boolean().default(true),
+  crawlableLinksFixing: z.boolean().default(true),
+  fontSizeValidation: z.boolean().default(true),
+  tapTargetOptimization: z.boolean().default(true),
+  headingHierarchyFix: z.boolean().default(true),
+  imageAltGeneration: z.boolean().default(true),
+  metaKeywordsGeneration: z.boolean().default(false), // Deprecated but some use
+  // Site-specific settings
+  siteName: z.string().optional(),
+  defaultTitle: z.string().optional(), 
+  defaultDescription: z.string().optional(),
+  siteUrl: z.string().optional(),
+});
+
+// ─── Security Headers Settings ─────────────────────────────────────
+
+const securitySettingsSchema = z.object({
+  enabled: z.boolean().default(true),
+  enableCSP: z.boolean().default(true),
+  enableSecurityHeaders: z.boolean().default(true),
+  enableHSTS: z.boolean().default(true),
+  enableFrameProtection: z.boolean().default(true),
+  enableContentTypeOptions: z.boolean().default(true),
+  enableReferrerPolicy: z.boolean().default(true),
+  enablePermissionsPolicy: z.boolean().default(true),
+  cspDirectives: z.record(z.string()).default({
+    'default-src': "'self'",
+    'script-src': "'self' 'unsafe-inline'",
+    'style-src': "'self' 'unsafe-inline'",
+    'img-src': "'self' data: https:",
+    'font-src': "'self' data:",
+    'connect-src': "'self'",
+    'media-src': "'self'",
+    'object-src': "'none'",
+    'base-uri': "'self'",
+    'form-action': "'self'",
+    'frame-ancestors': "'none'",
+    'upgrade-insecure-requests': '',
+    'require-trusted-types-for': "'script'", // Critical for Best Practices
+  }),
+  hstsMaxAge: z.number().default(63072000), // 2 years
+  frameOptions: z.enum(['DENY', 'SAMEORIGIN']).default('DENY'),
+  referrerPolicy: z.enum([
+    'no-referrer',
+    'no-referrer-when-downgrade',
+    'origin',
+    'origin-when-cross-origin',
+    'strict-origin',
+    'strict-origin-when-cross-origin',
+    'unsafe-url',
+  ]).default('strict-origin-when-cross-origin'),
+  permissionsPolicyDirectives: z.array(z.string()).default([
+    'geolocation=()',
+    'camera=()',
+    'microphone=()',
+    'payment=()',
+    'usb=()',
+    'magnetometer=()',
+    'gyroscope=()',
+    'accelerometer=()',
+  ]),
+});
+
 // ─── Root Schema ──────────────────────────────────────────────────
 
 export const settingsSchema = z.object({
@@ -430,6 +518,29 @@ export const settingsSchema = z.object({
     features: { altText: false, metaDescriptions: false, structuredData: false, accessibilityImprovements: false, contentOptimization: false },
     customInstructions: '',
   }),
+  cls: clsSettingsSchema.default({
+    enabled: true, imageDimensionInjection: true, fontDisplayStrategy: 'optional',
+    dynamicContentReservation: true, enableLayoutContainment: true, addResponsiveCSS: true,
+    preventFontLoaderShifts: true, reserveAdSpace: true, cookieBannerOptimization: true,
+  }),
+  seo: seoSettingsSchema.default({
+    enabled: true, autoGenerateAltText: true, metaTagInjection: true, structuredDataInjection: true,
+    openGraphTags: true, twitterCardMeta: true, canonicalUrlGeneration: true, robotsMetaOptimization: true,
+    linkTextOptimization: true, crawlableLinksFixing: true, fontSizeValidation: true,
+    tapTargetOptimization: true, headingHierarchyFix: true, imageAltGeneration: true, metaKeywordsGeneration: false,
+  }),
+  security: securitySettingsSchema.default({
+    enabled: true, enableCSP: true, enableSecurityHeaders: true, enableHSTS: true,
+    enableFrameProtection: true, enableContentTypeOptions: true, enableReferrerPolicy: true, enablePermissionsPolicy: true,
+    cspDirectives: {
+      'default-src': "'self'", 'script-src': "'self' 'unsafe-inline'", 'style-src': "'self' 'unsafe-inline'",
+      'img-src': "'self' data: https:", 'font-src': "'self' data:", 'connect-src': "'self'",
+      'media-src': "'self'", 'object-src': "'none'", 'base-uri': "'self'", 'form-action': "'self'",
+      'frame-ancestors': "'none'", 'upgrade-insecure-requests': '', 'require-trusted-types-for': "'script'",
+    },
+    hstsMaxAge: 63072000, frameOptions: 'DENY', referrerPolicy: 'strict-origin-when-cross-origin',
+    permissionsPolicyDirectives: ['geolocation=()', 'camera=()', 'microphone=()', 'payment=()', 'usb=()', 'magnetometer=()', 'gyroscope=()', 'accelerometer=()'],
+  }),
   build: buildSettingsSchema.default({
     scope: 'full', scheduleMode: 'manual', cronPattern: '', pageSelection: 'sitemap',
     customUrls: [], excludePatterns: ['/wp-admin/*', '/feed/*', '/author/*', '/?s=*'],
@@ -491,4 +602,7 @@ export {
   resourceHintsSchema,
   aiSettingsSchema,
   buildSettingsSchema,
+  clsSettingsSchema,
+  seoSettingsSchema,
+  securitySettingsSchema,
 };
