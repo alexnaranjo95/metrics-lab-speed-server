@@ -5,7 +5,7 @@ import { api } from '@/lib/api';
 import { BuildViewer } from '@/components/build-viewer/BuildViewer';
 import { BuildLogs } from '@/components/build-logs/BuildLogs';
 import { cn, formatBytes, formatDate } from '@/lib/utils';
-import { ArrowLeft, CheckCircle, XCircle, Loader2, Clock } from 'lucide-react';
+import { ArrowLeft, CheckCircle, XCircle, Loader2, Clock, BarChart3 } from 'lucide-react';
 
 const PHASES = ['crawl', 'images', 'css', 'js', 'html', 'fonts', 'deploy'];
 
@@ -52,7 +52,7 @@ export function BuildPage() {
         </Link>
         <div className="flex-1">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold">Build {buildId.slice(0, 12)}</h1>
+            <h1 className="text-xl font-bold">Build {build.displayName ?? buildId.replace('build_', '').slice(0, 12)}</h1>
             <StatusBadge status={build.status} />
           </div>
           <p className="text-sm text-[hsl(var(--muted-foreground))]">
@@ -119,8 +119,14 @@ export function BuildPage() {
       {/* Before / After Comparison — shown when build is complete */}
       {build.status === 'success' && (build.originalSizeBytes || build.lighthouseScoreBefore != null) && (
         <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
-          <div className="px-5 py-3 border-b border-[hsl(var(--border))]">
+          <div className="px-5 py-3 border-b border-[hsl(var(--border))] flex items-center justify-between">
             <h3 className="text-sm font-semibold">Performance Comparison</h3>
+            <Link
+              to={`/sites/${siteId}/performance`}
+              className="flex items-center gap-1.5 text-xs text-[hsl(var(--primary))] hover:underline"
+            >
+              <BarChart3 className="h-3.5 w-3.5" /> View Full Performance Dashboard
+            </Link>
           </div>
           <div className="p-5">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

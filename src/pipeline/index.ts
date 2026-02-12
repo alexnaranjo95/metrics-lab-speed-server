@@ -6,7 +6,7 @@ import { sites, builds, pages as pagesTable, assetOverrides } from '../db/schema
 import { crawlSite } from './crawl.js';
 import { optimizeAll } from './optimize.js';
 import { deployToCloudflare } from './deploy.js';
-import { measureWithPageSpeed, isPageSpeedAvailable, type PageSpeedResult } from '../services/pagespeed.js';
+import { measureWithPageSpeed, isPageSpeedAvailable, runComparison, type PageSpeedResult } from '../services/pagespeed.js';
 import { notifyDashboard } from '../services/dashboardNotifier.js';
 import { getCachedResolvedSettings } from '../shared/settingsMerge.js';
 import { buildEmitter } from '../events/buildEmitter.js';
@@ -203,28 +203,48 @@ export async function runBuildPipeline(
     let edgeScore: PageSpeedResult = { ...originalScore };
 
     try {
-      // Run mobile measurements for both origin and edge
-      [originalScore, edgeScore] = await Promise.all([
-        measureWithPageSpeed(site.siteUrl, 'mobile'),
-        measureWithPageSpeed(deployResult.url, 'mobile'),
-      ]);
+      // Calculate payload savings from optimization results
+      const payloadSavings = {
+        totalKb: optimizeResult.stats
+          ? Math.round(((optimizeResult.stats.images.originalBytes - optimizeResult.stats.images.optimizedBytes)
+            + (optimizeResult.stats.js.originalBytes - optimizeResult.stats.js.optimizedBytes)
+            + (optimizeResult.stats.css.originalBytes - optimizeResult.stats.css.optimizedBytes)) / 1024)
+          : undefined,
+        imageKb: optimizeResult.stats
+          ? Math.round((optimizeResult.stats.images.originalBytes - optimizeResult.stats.images.optimizedBytes) / 1024)
+          : undefined,
+        jsKb: optimizeResult.stats
+          ? Math.round((optimizeResult.stats.js.originalBytes - optimizeResult.stats.js.optimizedBytes) / 1024)
+          : undefined,
+        cssKb: optimizeResult.stats
+          ? Math.round((optimizeResult.stats.css.originalBytes - optimizeResult.stats.css.optimizedBytes) / 1024)
+          : undefined,
+      };
+
+      // Run full comparison (mobile + desktop) and persist to performance_comparisons
+      const comparisons = await runComparison(
+        siteId,
+        site.siteUrl,
+        deployResult.url,
+        buildId,
+        payloadSavings
+      );
+
+      // Extract mobile results for the build record (backward compat)
+      const mobileComparison = comparisons.find(c => c.strategy === 'mobile');
+      if (mobileComparison) {
+        originalScore = mobileComparison.original;
+        edgeScore = mobileComparison.optimized;
+      }
 
       const fmtScore = (r: PageSpeedResult) =>
         `Score ${r.performance}, LCP ${(r.lcp / 1000).toFixed(1)}s, TBT ${Math.round(r.tbt)}ms, CLS ${r.cls}, FCP ${(r.fcp / 1000).toFixed(1)}s, SI ${(r.si / 1000).toFixed(1)}s`;
 
-      buildEmitter.log(buildId, 'measure', 'info', `[measure] Origin: ${fmtScore(originalScore)}`);
-      buildEmitter.log(buildId, 'measure', 'info', `[measure] Edge:   ${fmtScore(edgeScore)}`);
-      buildEmitter.log(buildId, 'measure', 'info', `Performance: ${originalScore.performance} → ${edgeScore.performance}`);
-
-      // Also run desktop measurement (log only — for context)
-      if (psiAvailable) {
-        try {
-          const edgeDesktop = await measureWithPageSpeed(deployResult.url, 'desktop');
-          buildEmitter.log(buildId, 'measure', 'info', `[measure] Edge (desktop): ${fmtScore(edgeDesktop)}`);
-        } catch {
-          // Desktop measurement is non-critical
-        }
+      for (const c of comparisons) {
+        buildEmitter.log(buildId, 'measure', 'info', `[measure] Origin (${c.strategy}): ${fmtScore(c.original)}`);
+        buildEmitter.log(buildId, 'measure', 'info', `[measure] Edge (${c.strategy}):   ${fmtScore(c.optimized)}`);
       }
+      buildEmitter.log(buildId, 'measure', 'info', `Performance: ${originalScore.performance} → ${edgeScore.performance}`);
     } catch (err) {
       buildEmitter.log(buildId, 'measure', 'warn', `Performance measurement failed (non-fatal): ${(err as Error).message}`);
     }

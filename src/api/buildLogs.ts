@@ -4,16 +4,24 @@ import { db } from '../db/index.js';
 import { builds } from '../db/schema.js';
 import { buildEmitter } from '../events/buildEmitter.js';
 import type { BuildLogEvent } from '../events/buildEmitter.js';
+import { config } from '../config.js';
 
 /**
  * SSE endpoint for streaming build logs in real-time.
  * Sends existing logs first, then streams new events as they arrive.
+ * Auth: Bearer header or ?token= query param (EventSource cannot send headers).
  */
 export const buildLogRoutes: FastifyPluginAsync = async (app) => {
-  app.get<{ Params: { buildId: string } }>(
+  app.get<{ Params: { buildId: string }; Querystring: { token?: string } }>(
     '/builds/:buildId/logs',
     async (req, reply) => {
       const { buildId } = req.params;
+      const authHeader = req.headers.authorization;
+      const tokenParam = (req.query as { token?: string }).token;
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : tokenParam;
+      if (config.MASTER_API_KEY && token !== config.MASTER_API_KEY) {
+        return reply.code(401).send({ error: 'Unauthorized' });
+      }
 
       // Verify build exists
       const build = await db.query.builds.findFirst({

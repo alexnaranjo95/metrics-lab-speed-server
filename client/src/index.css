@@ -58,3 +58,33 @@ body {
 * {
   border-color: hsl(var(--border));
 }
+
+/* Print styles for report page */
+@media print {
+  header, [class*="print-hidden"], nav {
+    display: none !important;
+  }
+
+  body {
+    background: white !important;
+    color: #000 !important;
+    font-size: 12px;
+  }
+
+  main {
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .report-content {
+    page-break-inside: avoid;
+  }
+
+  .report-content section {
+    page-break-inside: avoid;
+  }
+
+  table {
+    font-size: 11px;
+  }
+}

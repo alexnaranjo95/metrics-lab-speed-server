@@ -117,7 +117,7 @@ function BuildCard({ build, siteId }: { build: Build; siteId: string }) {
         <BuildStatusIcon status={build.status} />
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium font-mono">{build.id}</span>
+            <span className="text-sm font-medium">{build.displayName ?? build.id.replace('build_', '').slice(0, 12)}</span>
             <StatusBadge status={build.status} />
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[hsl(var(--muted-foreground))] mt-0.5">

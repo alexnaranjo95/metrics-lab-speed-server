@@ -14,8 +14,10 @@ import { settingsRoutes } from './api/settings.js';
 import { websocketRoutes } from './api/websocket.js';
 import { buildLogRoutes } from './api/buildLogs.js';
 import { aiAgentRoutes } from './api/aiAgent.js';
+import { performanceRoutes } from './api/performance.js';
 import { buildWorker } from './queue/buildWorker.js';
 import { agentWorker } from './queue/agentWorker.js';
+import { monitorWorker, setupMonitorSchedule } from './queue/monitorQueue.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -113,6 +115,7 @@ async function start() {
   await app.register(siteRoutes, { prefix: '/api' });
   await app.register(buildRoutes, { prefix: '/api' });
   await app.register(buildLogRoutes, { prefix: '/api' });
+  await app.register(performanceRoutes, { prefix: '/api' });
   await app.register(webhookRoutes, { prefix: '/webhooks' });
   await app.register(websocketRoutes);
 
@@ -126,6 +129,11 @@ async function start() {
     });
   }
 
+  // Set up performance monitoring schedule
+  await setupMonitorSchedule().catch(err => {
+    console.warn('Monitor schedule setup failed (continuing):', (err as Error).message);
+  });
+
   // Start server
   await app.listen({ port: config.PORT, host: '0.0.0.0' });
   app.log.info(`Server listening on port ${config.PORT}`);
@@ -135,6 +143,7 @@ async function start() {
     app.log.info('Shutting down...');
     await buildWorker.close();
     await agentWorker.close();
+    await monitorWorker.close();
     await app.close();
     process.exit(0);
   };

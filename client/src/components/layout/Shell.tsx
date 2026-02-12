@@ -1,13 +1,39 @@
 import { useState } from 'react';
 import { Link, Outlet, useLocation, useParams } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronRight, LogIn } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { api } from '@/lib/api';
+
+function domainFromUrl(url: string): string {
+  try {
+    return new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
 
 export function Shell() {
   const location = useLocation();
   const params = useParams();
-  const breadcrumbs = buildBreadcrumbs(location.pathname, params);
+  const { siteId, buildId } = params;
+
+  const { data: site } = useQuery({
+    queryKey: ['site', siteId],
+    queryFn: () => api.getSite(siteId!),
+    enabled: !!siteId && !!localStorage.getItem('apiKey'),
+  });
+
+  const { data: build } = useQuery({
+    queryKey: ['build', siteId, buildId],
+    queryFn: () => api.getBuild(siteId!, buildId!),
+    enabled: !!siteId && !!buildId && !!localStorage.getItem('apiKey'),
+  });
+
+  const breadcrumbs = buildBreadcrumbs(location.pathname, params, {
+    domain: site?.siteUrl ? domainFromUrl(site.siteUrl) : null,
+    buildDisplayName: build?.displayName ?? (buildId ? buildId.replace('build_', '').slice(0, 8) : null),
+  });
 
   return (
     <div className="min-h-screen bg-[hsl(var(--background))]">
@@ -16,13 +42,12 @@ export function Shell() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex h-14 items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
-              <Link to="/" className="flex items-center gap-2 font-semibold text-lg shrink-0">
+              <Link to="/" className="flex items-center shrink-0" title="Metrics Lab">
                 <img
                   src="/metrics-lab-logo.png"
                   alt="Metrics Lab"
                   className="h-5 w-auto"
                 />
-                <span className="hidden sm:inline">Metrics Lab</span>
               </Link>
               {breadcrumbs.length > 0 && (
                 <nav className="flex items-center gap-1 text-sm min-w-0">
@@ -56,7 +81,11 @@ export function Shell() {
   );
 }
 
-function buildBreadcrumbs(pathname: string, params: Record<string, string | undefined>): { label: string; path: string }[] {
+function buildBreadcrumbs(
+  pathname: string,
+  params: Record<string, string | undefined>,
+  ctx?: { domain?: string | null; buildDisplayName?: string | null }
+): { label: string; path: string }[] {
   const crumbs: { label: string; path: string }[] = [];
   if (pathname === '/') return crumbs;
 
@@ -64,19 +93,28 @@ function buildBreadcrumbs(pathname: string, params: Record<string, string | unde
 
   const siteId = params.siteId;
   if (siteId) {
-    crumbs.push({ label: siteId.replace('site_', ''), path: `/sites/${siteId}` });
+    const siteLabel = ctx?.domain ?? siteId.replace('site_', '').slice(0, 12);
+    crumbs.push({ label: siteLabel, path: `/sites/${siteId}` });
   }
 
   if (pathname.includes('/builds/')) {
     const buildId = params.buildId;
     crumbs.push({ label: 'Builds', path: `/sites/${siteId}/builds` });
     if (buildId) {
-      crumbs.push({ label: buildId.replace('build_', ''), path: pathname });
+      const buildLabel = ctx?.buildDisplayName ?? buildId.replace('build_', '').slice(0, 8);
+      crumbs.push({ label: buildLabel, path: pathname });
     }
   } else if (pathname.endsWith('/builds')) {
     crumbs.push({ label: 'Builds', path: pathname });
   } else if (siteId && pathname === `/sites/${siteId}`) {
     crumbs.push({ label: 'Settings', path: pathname });
+  } else if (pathname.includes('/performance/report')) {
+    crumbs.push({ label: 'Performance', path: `/sites/${siteId}/performance` });
+    crumbs.push({ label: 'Report', path: pathname });
+  } else if (pathname.includes('/performance')) {
+    crumbs.push({ label: 'Performance', path: pathname });
+  } else if (pathname.includes('/ai')) {
+    crumbs.push({ label: 'AI Agent', path: pathname });
   }
 
   return crumbs;

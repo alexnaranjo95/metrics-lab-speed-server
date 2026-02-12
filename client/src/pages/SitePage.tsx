@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, type Build } from '@/lib/api';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
 import { cn, formatBytes, formatDate } from '@/lib/utils';
-import { Play, ExternalLink, CheckCircle, XCircle, Clock, Loader2, Settings, Eye, Bot } from 'lucide-react';
+import { Play, ExternalLink, CheckCircle, XCircle, Clock, Loader2, Settings, Eye, Bot, BarChart3 } from 'lucide-react';
 
 export function SitePage() {
   const { siteId } = useParams<{ siteId: string }>();
@@ -82,6 +82,13 @@ export function SitePage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            to={`/sites/${siteId}/performance`}
+            className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+          >
+            <BarChart3 className="h-4 w-4" />
+            Performance
+          </Link>
           <button
             onClick={async () => {
               try {

@@ -37,6 +37,7 @@ export interface Site {
 export interface Build {
   id: string;
   siteId: string;
+  displayName?: string;
   scope: string;
   triggeredBy: string;
   status: string;
@@ -175,4 +176,189 @@ export const api = {
     fetchJson<{ report: any }>(`/sites/${siteId}/ai/report`),
   stopAgent: (siteId: string) =>
     fetchJson<{ stopped: boolean }>(`/sites/${siteId}/ai/stop`, { method: 'POST', body: '{}' }),
+
+  // Performance Comparison
+  performance: {
+    getComparison: (siteId: string) =>
+      fetchJson<{ mobile: PerformanceComparison | null; desktop: PerformanceComparison | null }>(
+        `/sites/${siteId}/performance/comparison`
+      ),
+    getHistory: (siteId: string, opts?: { strategy?: string; from?: string; to?: string; limit?: number; offset?: number }) => {
+      const params = new URLSearchParams();
+      if (opts?.strategy) params.set('strategy', opts.strategy);
+      if (opts?.from) params.set('from', opts.from);
+      if (opts?.to) params.set('to', opts.to);
+      if (opts?.limit) params.set('limit', String(opts.limit));
+      if (opts?.offset) params.set('offset', String(opts.offset));
+      return fetchJson<{ comparisons: PerformanceComparison[]; total: number }>(
+        `/sites/${siteId}/performance/comparison/history?${params}`
+      );
+    },
+    getTimeSeries: (siteId: string, strategy = 'mobile', days = 30) =>
+      fetchJson<{ strategy: string; days: number; dataPoints: TimeSeriesPoint[] }>(
+        `/sites/${siteId}/performance/metrics/timeseries?strategy=${strategy}&days=${days}`
+      ),
+    triggerTest: (siteId: string) =>
+      fetchJson<{ testId: string; status: string; message: string }>(
+        `/sites/${siteId}/performance/test`, { method: 'POST', body: '{}' }
+      ),
+    getTestStatus: (siteId: string, testId: string) =>
+      fetchJson<{ testId: string; status: string; progress: any }>(
+        `/sites/${siteId}/performance/test/${testId}`
+      ),
+    getBusinessImpact: (siteId: string) =>
+      fetchJson<{ impact: BusinessImpact; comparison: PerformanceComparison }>(
+        `/sites/${siteId}/performance/business-impact`
+      ),
+    getReport: (siteId: string) =>
+      fetchJson<PerformanceReport>(`/sites/${siteId}/performance/report`),
+    exportCsv: (siteId: string, days = 90, strategy?: string) => {
+      const params = new URLSearchParams({ days: String(days) });
+      if (strategy) params.set('strategy', strategy);
+      return `${API_BASE}/sites/${siteId}/performance/export/csv?${params}`;
+    },
+    exportJson: (siteId: string, days = 90, strategy?: string) => {
+      const params = new URLSearchParams({ days: String(days) });
+      if (strategy) params.set('strategy', strategy);
+      return fetchJson<{ comparisons: PerformanceComparison[]; exported: number }>(
+        `/sites/${siteId}/performance/export/json?${params}`
+      );
+    },
+    getMonitor: (siteId: string) =>
+      fetchJson<{ monitor: PerformanceMonitor | null }>(`/sites/${siteId}/performance/monitor`),
+    updateMonitor: (siteId: string, data: Partial<PerformanceMonitor>) =>
+      fetchJson<{ monitor: PerformanceMonitor }>(`/sites/${siteId}/performance/monitor`, {
+        method: 'PUT', body: JSON.stringify(data),
+      }),
+    getAlertRules: (siteId: string) =>
+      fetchJson<{ rules: AlertRule[] }>(`/sites/${siteId}/performance/alerts`),
+    createAlertRule: (siteId: string, data: Omit<AlertRule, 'id' | 'createdAt' | 'lastTriggeredAt'>) =>
+      fetchJson<{ rule: AlertRule }>(`/sites/${siteId}/performance/alerts`, {
+        method: 'POST', body: JSON.stringify(data),
+      }),
+    updateAlertRule: (siteId: string, ruleId: string, data: Partial<AlertRule>) =>
+      fetchJson<{ rule: AlertRule }>(`/sites/${siteId}/performance/alerts/${ruleId}`, {
+        method: 'PUT', body: JSON.stringify(data),
+      }),
+    deleteAlertRule: (siteId: string, ruleId: string) =>
+      fetchJson<{ deleted: boolean }>(`/sites/${siteId}/performance/alerts/${ruleId}`, {
+        method: 'DELETE',
+      }),
+    getAlertLog: (siteId: string, limit = 50) =>
+      fetchJson<{ logs: AlertLogEntry[] }>(`/sites/${siteId}/performance/alerts/log?limit=${limit}`),
+  },
 };
+
+// ─── Performance Types ────────────────────────────────────────────
+
+export interface PerformanceMetrics {
+  performance: number;
+  lcp: number;
+  tbt: number;
+  cls: number;
+  fcp: number;
+  si: number;
+  ttfb: number;
+}
+
+export interface PerformanceComparison {
+  id: string;
+  siteId: string;
+  buildId: string | null;
+  testedAt: string;
+  strategy: 'mobile' | 'desktop';
+  originalDomain: string;
+  optimizedDomain: string;
+  original: PerformanceMetrics;
+  optimized: PerformanceMetrics;
+  improvements: {
+    score: number;
+    lcp: number;
+    tbt: number;
+    cls: number;
+    fcp: number;
+    si: number;
+  };
+  payloadSavings: {
+    totalKb: number | null;
+    imageKb: number | null;
+    jsKb: number | null;
+    cssKb: number | null;
+  };
+  fieldDataOriginal: any;
+  fieldDataOptimized: any;
+  opportunitiesOriginal: Array<{ id: string; title: string; savings: number }>;
+  opportunitiesOptimized: Array<{ id: string; title: string; savings: number }>;
+}
+
+export interface TimeSeriesPoint {
+  testedAt: string;
+  originalScore: number | null;
+  optimizedScore: number | null;
+  originalLcp: number | null;
+  optimizedLcp: number | null;
+  originalFcp: number | null;
+  optimizedFcp: number | null;
+  originalSi: number | null;
+  optimizedSi: number | null;
+  originalTbt: number | null;
+  optimizedTbt: number | null;
+  originalCls: number | null;
+  optimizedCls: number | null;
+}
+
+export interface BusinessImpact {
+  conversionRateIncrease: number;
+  bounceRateReduction: number;
+  pageViewsIncrease: number;
+  seoRankingImpact: 'positive' | 'neutral' | 'negative';
+  loadTimeReductionMs: number;
+  scoreImprovement: number;
+}
+
+export interface PerformanceReport {
+  site: { id: string; name: string; siteUrl: string; edgeUrl: string | null };
+  generatedAt: string;
+  mobile: PerformanceComparison | null;
+  desktop: PerformanceComparison | null;
+  trends: Array<{ testedAt: string; originalScore: number | null; optimizedScore: number | null }>;
+  businessImpact: BusinessImpact | null;
+}
+
+export interface PerformanceMonitor {
+  id: string;
+  siteId: string;
+  frequency: string;
+  enabled: boolean;
+  alertOnRegression: boolean;
+  regressionThreshold: number;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  createdAt: string;
+}
+
+export interface AlertRule {
+  id: string;
+  siteId: string;
+  metric: string;
+  condition: string;
+  value: number;
+  timeWindow: string;
+  severity: string;
+  channels: string[];
+  enabled: boolean;
+  webhookUrl: string | null;
+  slackWebhookUrl: string | null;
+  lastTriggeredAt: string | null;
+  createdAt: string;
+}
+
+export interface AlertLogEntry {
+  id: string;
+  siteId: string;
+  ruleId: string | null;
+  message: string;
+  severity: string;
+  data: any;
+  createdAt: string;
+}

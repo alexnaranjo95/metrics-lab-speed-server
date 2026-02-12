@@ -9,6 +9,7 @@ import { buildEmitter } from '../events/buildEmitter.js';
 import { deepMerge } from '../shared/settingsMerge.js';
 import { analyzeSite } from './analyzer.js';
 import { generateOptimizationPlan } from './planner.js';
+import { fetchFullPageSpeedData, isPageSpeedAvailable } from '../services/pagespeed.js';
 import { aiReviewAndAdjust } from './reviewer.js';
 import { compareVisuals } from '../verification/visual.js';
 import { verifyFunctionalBehavior } from '../verification/functional.js';
@@ -113,11 +114,26 @@ export async function runOptimizationAgent(siteId: string): Promise<AgentReport>
 
     if (state.aborted) { log('Agent aborted by user.'); setPhase('failed'); return buildReport(state, inventory, []); }
 
+    // ── PHASE 1B: PageSpeed Insights (when available) ──
+    let pageSpeedData = null;
+    if (isPageSpeedAvailable()) {
+      log('Fetching PageSpeed Insights (all categories)...');
+      try {
+        pageSpeedData = await fetchFullPageSpeedData(site.siteUrl, 'mobile');
+        if (pageSpeedData) {
+          log(`PageSpeed: Perf=${pageSpeedData.scores.performance}, A11y=${pageSpeedData.scores.accessibility}, SEO=${pageSpeedData.scores.seo}`);
+          log(`Optimization plan: ${pageSpeedData.optimizationPlan.length} actions`);
+        }
+      } catch (e) {
+        log(`PageSpeed fetch failed: ${(e as Error).message} — continuing without`);
+      }
+    }
+
     // ── PHASE 1B: AI PLANNING ──
     setPhase('planning');
     log('PHASE 1B: AI generating optimization plan...');
 
-    const plan = await generateOptimizationPlan(inventory, log);
+    const plan = await generateOptimizationPlan(inventory, log, pageSpeedData);
     log(`Expected Lighthouse: ${plan.expectedPerformance?.lighthouse || 'N/A'}`);
     log(`Risks: ${plan.risks?.length || 0}`);
 
@@ -144,7 +160,9 @@ export async function runOptimizationAgent(siteId: string): Promise<AgentReport>
         await db.update(sites).set({ settings: currentSettings, updatedAt: new Date() }).where(eq(sites.id, siteId));
 
         const buildId = `build_${nanoid(12)}`;
-        await db.insert(builds).values({ id: buildId, siteId, scope: 'full', triggeredBy: 'ai-agent', status: 'queued' });
+        const existingBuilds = await db.select({ id: builds.id }).from(builds).where(eq(builds.siteId, siteId));
+        const deploymentNumber = existingBuilds.length + 1;
+        await db.insert(builds).values({ id: buildId, siteId, scope: 'full', triggeredBy: 'ai-agent', status: 'queued', deploymentNumber });
         await buildQueue.add('build' as any, { buildId, siteId, scope: 'full' }, { jobId: buildId });
 
         log(`Build ${buildId} queued. Waiting for completion (up to 30 min)...`);

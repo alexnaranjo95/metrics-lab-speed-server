@@ -1,7 +1,7 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { useBuildLogs, type BuildLogEntry } from '@/hooks/useSSE';
 import { cn } from '@/lib/utils';
-import { Terminal } from 'lucide-react';
+import { Terminal, Wifi, WifiOff, ChevronDown } from 'lucide-react';
 
 interface BuildLogsProps {
   buildId: string;
@@ -29,10 +29,29 @@ const PHASE_COLORS: Record<string, string> = {
 export function BuildLogs({ buildId, enabled = true }: BuildLogsProps) {
   const { logs, phase, isComplete, isConnected } = useBuildLogs({ buildId, enabled });
   const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [userScrolled, setUserScrolled] = useState(false);
 
   useEffect(() => {
+    if (autoScroll && !userScrolled) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [logs.length, autoScroll, userScrolled]);
+
+  const handleScroll = () => {
+    if (!containerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
+    const atBottom = scrollHeight - scrollTop - clientHeight < 50;
+    setUserScrolled(!atBottom);
+    if (atBottom) setAutoScroll(true);
+  };
+
+  const scrollToBottom = () => {
+    setAutoScroll(true);
+    setUserScrolled(false);
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs.length]);
+  };
 
   return (
     <div className="rounded-lg border border-[hsl(var(--border))] bg-gray-950 overflow-hidden">
@@ -47,14 +66,29 @@ export function BuildLogs({ buildId, enabled = true }: BuildLogsProps) {
             </span>
           )}
         </div>
-        <span className="text-xs text-gray-500">
-          {logs.length} entries
-          {isComplete && ' (complete)'}
-        </span>
+        <div className="flex items-center gap-2">
+          {isConnected ? (
+            <span className="flex items-center gap-1 text-xs text-green-500">
+              <Wifi className="h-3 w-3" /> Connected
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-xs text-gray-500">
+              <WifiOff className="h-3 w-3" /> Disconnected
+            </span>
+          )}
+          <span className="text-xs text-gray-500">
+            {logs.length} entries
+            {isComplete && ' · complete'}
+          </span>
+        </div>
       </div>
 
       {/* Log area */}
-      <div className="h-80 overflow-y-auto p-3 font-mono text-xs leading-relaxed">
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        className="h-80 overflow-y-auto p-3 font-mono text-xs leading-relaxed"
+      >
         {logs.length === 0 && !isComplete && (
           <div className="text-gray-600 animate-pulse">Waiting for logs...</div>
         )}
@@ -63,6 +97,26 @@ export function BuildLogs({ buildId, enabled = true }: BuildLogsProps) {
         ))}
         <div ref={bottomRef} />
       </div>
+      {!userScrolled && logs.length > 0 && (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          className="flex items-center gap-1 w-full px-4 py-1.5 text-xs text-gray-500 hover:text-gray-400 hover:bg-gray-900/50 border-t border-gray-800"
+        >
+          <ChevronDown className="h-3 w-3" />
+          Auto-scroll enabled
+        </button>
+      )}
+      {userScrolled && logs.length > 0 && (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          className="flex items-center gap-1 w-full px-4 py-1.5 text-xs text-[hsl(var(--primary))] hover:bg-gray-900/50 border-t border-gray-800"
+        >
+          <ChevronDown className="h-3 w-3" />
+          Scroll to bottom
+        </button>
+      )}
     </div>
   );
 }

@@ -49,6 +49,10 @@ export async function buildRoutes(app: FastifyInstance) {
       });
     }
 
+    // Next deployment number for this site
+    const existing = await db.select({ id: builds.id }).from(builds).where(eq(builds.siteId, siteId));
+    const deploymentNumber = existing.length + 1;
+
     // Create build record
     const buildId = `build_${nanoid(12)}`;
     const [build] = await db.insert(builds).values({
@@ -57,6 +61,7 @@ export async function buildRoutes(app: FastifyInstance) {
       scope,
       triggeredBy: 'api',
       status: 'queued',
+      deploymentNumber,
     }).returning();
 
     // Enqueue the build job
@@ -91,9 +96,24 @@ export async function buildRoutes(app: FastifyInstance) {
       return reply.status(404).send({ error: 'Build not found' });
     }
 
+    const site = await db.query.sites.findFirst({
+      where: eq(sites.id, build.siteId),
+    });
+    const displayName = site
+      ? (() => {
+          try {
+            const h = new URL(site.siteUrl.startsWith('http') ? site.siteUrl : `https://${site.siteUrl}`).hostname.replace(/^www\./, '');
+            const safe = h.replace(/[^a-zA-Z0-9.-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || h;
+            const n = build.deploymentNumber ?? 0;
+            return n > 0 ? `${safe}-Deploy-${n}` : safe;
+          } catch { return build.id.slice(0, 12); }
+        })()
+      : build.id.slice(0, 12);
+
     return {
       id: build.id,
       siteId: build.siteId,
+      displayName,
       scope: build.scope,
       triggeredBy: build.triggeredBy,
       status: build.status,
@@ -219,9 +239,19 @@ export async function buildRoutes(app: FastifyInstance) {
       offset,
     });
 
+    const buildDisplayName = (b: typeof buildList[0]) => {
+      try {
+        const h = new URL(site.siteUrl.startsWith('http') ? site.siteUrl : `https://${site.siteUrl}`).hostname.replace(/^www\./, '');
+        const safe = h.replace(/[^a-zA-Z0-9.-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || h;
+        const n = b.deploymentNumber ?? 0;
+        return n > 0 ? `${safe}-Deploy-${n}` : safe;
+      } catch { return b.id.slice(0, 12); }
+    };
+
     return {
       builds: buildList.map(b => ({
         id: b.id,
+        displayName: buildDisplayName(b),
         scope: b.scope,
         triggeredBy: b.triggeredBy,
         status: b.status,

@@ -28,7 +28,9 @@ export function useBuildLogs({ buildId, enabled = true }: UseSSEOptions) {
   useEffect(() => {
     if (!enabled || !buildId) return;
 
-    const source = new EventSource(`/api/builds/${buildId}/logs`);
+    const token = localStorage.getItem('apiKey') || '';
+    const url = token ? `/api/builds/${buildId}/logs?token=${encodeURIComponent(token)}` : `/api/builds/${buildId}/logs`;
+    const source = new EventSource(url);
     sourceRef.current = source;
 
     source.onopen = () => setIsConnected(true);

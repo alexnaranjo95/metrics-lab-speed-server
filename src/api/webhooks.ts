@@ -58,6 +58,10 @@ export async function webhookRoutes(app: FastifyInstance) {
       ? [body.data.post_url]
       : undefined;
 
+    // Next deployment number for this site
+    const existing = await db.select({ id: builds.id }).from(builds).where(eq(builds.siteId, site.id));
+    const deploymentNumber = existing.length + 1;
+
     // Create build record
     const buildId = `build_${nanoid(12)}`;
     const [build] = await db.insert(builds).values({
@@ -66,6 +70,7 @@ export async function webhookRoutes(app: FastifyInstance) {
       scope,
       triggeredBy: 'webhook',
       status: 'queued',
+      deploymentNumber,
     }).returning();
 
     // Enqueue the build job

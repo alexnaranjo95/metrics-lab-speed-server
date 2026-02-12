@@ -41,6 +41,9 @@ export interface OverlayData {
  * - `build:{id}:overlay`  — Element overlay data for the viewer
  * - `build:{id}:complete` — Build finished (success or failure)
  * - `build:{id}:phase`    — Phase change notification
+ * - `perf:{siteId}:started`  — Performance test initiated
+ * - `perf:{siteId}:progress` — Partial results (e.g., original mobile done)
+ * - `perf:{siteId}:complete` — Full comparison ready
  */
 class BuildEventEmitter extends EventEmitter {
   constructor() {
@@ -83,6 +86,23 @@ class BuildEventEmitter extends EventEmitter {
       message,
       meta,
     });
+  }
+
+  // ─── Performance test events ────────────────────────────────────
+
+  /** Emit performance test started */
+  emitPerfStarted(siteId: string, data: { testId: string; originalDomain: string; optimizedDomain: string }) {
+    this.emit(`perf:${siteId}:started`, data);
+  }
+
+  /** Emit performance test progress (partial result) */
+  emitPerfProgress(siteId: string, data: { testId: string; step: string; message: string }) {
+    this.emit(`perf:${siteId}:progress`, data);
+  }
+
+  /** Emit performance test complete */
+  emitPerfComplete(siteId: string, data: { testId: string; comparisons: any[] }) {
+    this.emit(`perf:${siteId}:complete`, data);
   }
 }
 

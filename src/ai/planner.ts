@@ -1,9 +1,11 @@
 import { claudeJSON } from './claude.js';
 import type { SiteInventory, OptimizationPlan } from './types.js';
+import type { OptimizationWorkflow } from '../services/pagespeed/types.js';
 
 export async function generateOptimizationPlan(
   inventory: SiteInventory,
-  log: (msg: string) => void
+  log: (msg: string) => void,
+  pageSpeedData?: OptimizationWorkflow | null
 ): Promise<OptimizationPlan> {
   const systemPrompt = `You are an expert web performance optimization engineer. You are analyzing a WordPress website that will be converted to a high-performance static site deployed on Cloudflare Pages.
 
@@ -40,6 +42,26 @@ The settings object should match this shape (only include categories you want to
 }`;
 
   const interactive = inventory.interactiveElements.filter(e => e.type !== 'link');
+
+  let pageSpeedSection = '';
+  if (pageSpeedData) {
+    const { scores, coreWebVitals, opportunities, accessibilityIssues, seoIssues, optimizationPlan } = pageSpeedData;
+    pageSpeedSection = `
+
+PAGESPEED INSIGHTS (Live URL - Mobile):
+Scores: Performance ${scores.performance}, Accessibility ${scores.accessibility}, Best Practices ${scores.bestPractices}, SEO ${scores.seo}
+Core Web Vitals: LCP ${coreWebVitals.lcp.displayValue ?? coreWebVitals.lcp.numericValue ?? 'N/A'}, TBT ${coreWebVitals.tbt.displayValue ?? coreWebVitals.tbt.numericValue ?? 'N/A'}, CLS ${coreWebVitals.cls.displayValue ?? coreWebVitals.cls.numericValue ?? 'N/A'}
+
+FAILING AUDITS / OPPORTUNITIES (address these in settings):
+${opportunities.slice(0, 8).map(o => `- [${o.id}] ${o.title} (score: ${o.score}) → Actions: ${o.aiActions.join(', ')}`).join('\n')}
+${accessibilityIssues.slice(0, 5).map(a => `- [a11y] ${a.id}: ${a.title} → ${a.aiActions.join(', ')}`).join('\n')}
+${seoIssues.slice(0, 3).map(s => `- [seo] ${s.id}: ${s.title} → ${s.aiActions.join(', ')}`).join('\n')}
+
+AI OPTIMIZATION PLAN (prioritize in this order):
+${optimizationPlan.slice(0, 10).map((a, i) => `  ${i + 1}. [${a.category}] ${a.action} (impact: ${a.estimatedImpact}) → ${a.codeChanges.join(', ')}`).join('\n')}
+`;
+  }
+
   const userContent = `SITE: ${inventory.url}
 Pages: ${inventory.pageCount}
 Total size: ${inventory.totalSizeBytes} bytes
@@ -56,6 +78,7 @@ INTERACTIVE ELEMENTS (${interactive.length}):
 ${interactive.map(e => `- [${e.page}] ${e.type}: ${e.description} (trigger: ${e.triggerAction}, jQuery: ${e.dependsOnJquery})`).join('\n')}
 
 JQUERY: ${inventory.jqueryUsed ? `USED by: ${inventory.jqueryDependentScripts.join(', ')}. DO NOT remove jQuery.` : 'Not detected. jQuery removal MAY be safe.'}
+${pageSpeedSection}
 
 PAGES WITH FEATURES:
 ${inventory.pages.map(p => `- ${p.path}: slider=${p.hasSlider}, accordion=${p.hasAccordion}, tabs=${p.hasTabs}, modal=${p.hasModal}, dropdown=${p.hasDropdownMenu}, form=${p.hasForm}, video=${p.hasVideo}`).join('\n')}

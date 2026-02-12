@@ -38,6 +38,18 @@ export function formatTimeAgo(date: string | Date): string {
   return formatDate(date);
 }
 
+export function buildDisplayName(siteUrl: string, deploymentNumber: number | null): string {
+  try {
+    const hostname = new URL(siteUrl.startsWith('http') ? siteUrl : `https://${siteUrl}`).hostname;
+    const domain = hostname.replace(/^www\./, '');
+    const safe = domain.replace(/[^a-zA-Z0-9.-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || domain;
+    const num = deploymentNumber ?? 0;
+    return num > 0 ? `${safe}-Deploy-${num}` : safe;
+  } catch {
+    return `Deploy-${deploymentNumber ?? '?'}`;
+  }
+}
+
 export function formatDuration(startedAt: string | null, completedAt: string | null): string {
   if (!startedAt) return '--';
   const start = new Date(startedAt).getTime();
