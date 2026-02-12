@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config.js';
 
-const MODEL = 'claude-opus-4-20250514';
+const MODEL = 'claude-opus-4.5-20250514';
 
 let _client: Anthropic | null = null;
 

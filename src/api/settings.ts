@@ -38,7 +38,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     async (_req, reply) => {
       return reply.send({
         available: isAIAvailable(),
-        model: 'claude-opus-4-20250514',
+        model: 'claude-opus-4.5-20250514',
       });
     }
   );
