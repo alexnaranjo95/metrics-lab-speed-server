@@ -1,3 +1,6 @@
+-- Add deployment_number column to builds
+ALTER TABLE "builds" ADD COLUMN IF NOT EXISTS "deployment_number" integer;
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "alert_log" (
 	"id" text PRIMARY KEY NOT NULL,
 	"site_id" text NOT NULL,
@@ -84,7 +87,6 @@ CREATE TABLE IF NOT EXISTS "settings_history" (
 	"created_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "builds" ADD COLUMN "deployment_number" integer;--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "alert_log" ADD CONSTRAINT "alert_log_site_id_sites_id_fk" FOREIGN KEY ("site_id") REFERENCES "public"."sites"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
