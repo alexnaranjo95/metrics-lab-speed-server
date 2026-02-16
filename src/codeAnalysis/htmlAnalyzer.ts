@@ -312,8 +312,8 @@ export class HTMLAnalyzer {
 
     const dependencies: HTMLDependency[] = [];
 
-    // Scripts
-    this.$('script').each((_, el) => {
+    // Scripts  
+    this.$?.('script').each((_, el) => {
       const $el = this.$(el);
       const src = $el.attr('src');
       dependencies.push({
@@ -327,7 +327,7 @@ export class HTMLAnalyzer {
     });
 
     // Stylesheets
-    this.$('link[rel="stylesheet"], style').each((_, el) => {
+    this.$?.('link[rel="stylesheet"], style').each((_, el) => {
       const $el = this.$(el);
       const href = $el.attr('href');
       dependencies.push({
@@ -341,7 +341,7 @@ export class HTMLAnalyzer {
     });
 
     // Images
-    this.$('img').each((_, el) => {
+    this.$?.('img').each((_, el) => {
       const $el = this.$(el);
       const src = $el.attr('src');
       dependencies.push({
@@ -363,7 +363,7 @@ export class HTMLAnalyzer {
     const interactive: InteractiveElement[] = [];
 
     // Forms
-    this.$('form').each((_, el) => {
+    this.$?.('form').each((_, el) => {
       interactive.push({
         type: 'form',
         selector: this.generateSelector(el),
@@ -375,7 +375,7 @@ export class HTMLAnalyzer {
     });
 
     // Buttons
-    this.$('button, input[type="button"], input[type="submit"]').each((_, el) => {
+    this.$?.('button, input[type="button"], input[type="submit"]').each((_, el) => {
       interactive.push({
         type: 'button',
         selector: this.generateSelector(el),
@@ -387,7 +387,7 @@ export class HTMLAnalyzer {
     });
 
     // Links
-    this.$('a[href]').each((_, el) => {
+    this.$?.('a[href]').each((_, el) => {
       const $el = this.$(el);
       interactive.push({
         type: 'link',
@@ -400,7 +400,7 @@ export class HTMLAnalyzer {
     });
 
     // Detect common interactive patterns
-    this.$('[class*="modal"], [class*="dropdown"], [class*="slider"], [class*="carousel"]').each((_, el) => {
+    this.$?.('[class*="modal"], [class*="dropdown"], [class*="slider"], [class*="carousel"]').each((_, el) => {
       const className = this.$(el).attr('class') || '';
       let type: InteractiveElement['type'] = 'dropdown';
       
@@ -898,7 +898,8 @@ export class HTMLAnalyzer {
 
   private findElement(selector: string): Element | null {
     if (!this.$) return null;
-    return this.$(selector).get(0) || null;
+    const element = this.$(selector).get(0);
+    return element && 'name' in element ? element as Element : null;
   }
 
   private isCriticalElement(selector: string): boolean {

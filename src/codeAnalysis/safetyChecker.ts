@@ -452,9 +452,9 @@ export class CodeSafetyChecker {
       return 'No modifications detected - proceed with configuration-only changes';
     }
 
-    const riskScore = results.html?.safetyMetrics.modificationRiskScore || 0 +
-                     results.css?.safetyMetrics.modificationRiskScore || 0 +
-                     results.js?.safetyMetrics.modificationRiskScore || 0;
+    const riskScore = (results.html?.safetyMetrics?.modificationRiskScore || 0) +
+                     (results.css?.safetyMetrics?.modificationRiskScore || 0) +
+                     (results.js?.safetyMetrics?.modificationRiskScore || 0);
 
     if (riskScore > 150) {
       return 'Use settings-only optimizations - avoid direct code modifications';
@@ -470,7 +470,7 @@ export class CodeSafetyChecker {
   private generateAlternativeStrategies(results: Partial<CodeAnalysisResult>): string[] {
     const strategies: string[] = [];
 
-    if (results.css?.safetyMetrics.criticalRuleCount > 10) {
+    if ((results.css?.safetyMetrics?.criticalRuleCount || 0) > 10) {
       strategies.push('Use conservative CSS purging instead of aggressive');
       strategies.push('Implement CSS optimization in smaller batches');
     }
@@ -480,7 +480,7 @@ export class CodeSafetyChecker {
       strategies.push('Replace jQuery gradually, one function at a time');
     }
 
-    if (results.html?.safetyMetrics.complexInteractionsCount > 5) {
+    if ((results.html?.safetyMetrics?.complexInteractionsCount || 0) > 5) {
       strategies.push('Focus on non-interactive optimizations first');
       strategies.push('Use A/B testing for interactive element changes');
     }
@@ -491,15 +491,15 @@ export class CodeSafetyChecker {
   private generateRequiredPrecautions(results: Partial<CodeAnalysisResult>): string[] {
     const precautions: string[] = [];
 
-    if (results.html?.accessibility.missingAltImages.length > 0) {
+    if ((results.html?.accessibility?.missingAltImages?.length || 0) > 0) {
       precautions.push('Validate generated alt text for accuracy and context');
     }
 
-    if (results.css?.selectors.unused.length > 10) {
+    if ((results.css?.selectors?.unused?.length || 0) > 10) {
       precautions.push('Test all page states and responsive breakpoints');
     }
 
-    if (results.js?.safetyMetrics.eventListenerCount > 5) {
+    if ((results.js?.safetyMetrics?.eventListenerCount || 0) > 5) {
       precautions.push('Test all interactive functionality thoroughly');
     }
 

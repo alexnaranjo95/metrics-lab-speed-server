@@ -274,12 +274,12 @@ async function analyzeSiteCharacteristics(site: any, build: any): Promise<Optimi
 
   // Determine complexity based on page count and build duration
   if (build.pagesTotal > 50 || plugins.length > 10) {
-    complexity = 'complex';
+    complexity = 'complex' as const;
   } else if (build.pagesTotal < 10 && plugins.length < 3) {
-    complexity = 'simple';
+    complexity = 'simple' as const;
   }
 
-  return { cms, theme, plugins, complexity: complexity as 'simple' | 'moderate' | 'complex' };
+  return { cms, theme, plugins, complexity };
 }
 
 function extractOptimizationAttempts(build: any): OptimizationLearning['optimizationAttempts'] {

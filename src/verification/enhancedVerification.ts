@@ -231,7 +231,7 @@ export class EnhancedVerificationSystem {
       visual: { passed: false, aiReview: { overallVerdict: '', acceptableChanges: false, significantIssues: [], minorImprovements: [] }, pixelComparison: [], layoutAnalysis: { layoutShiftsDetected: false, newLayoutIssues: [], layoutImprovements: [] }, brandIntegrity: { colorsPreserved: true, typographyIntact: true, logoUnchanged: true, brandElementsIntact: true } },
       functional: { passed: false, testResults: [], newFunctionalities: [], brokenFunctionalities: [], performanceImpact: [], userExperienceImpact: { interactionSpeed: 'same', responsivenessRating: 5, usabilityIssues: [] } },
       accessibility: { passed: false, wcagCompliance: { level: 'A', score: 0, improvement: 0, newViolations: [], resolvedViolations: [] }, screenReaderCompatibility: { tested: false, issues: [], improvements: [] }, keyboardNavigation: { tested: false, tabOrder: false, focusManagement: false, issues: [] } },
-      links: { passed: false, results: [] },
+      links: { page: '', href: '', resolvedUrl: '', text: '', status: null, passed: false, failureReason: '', isExternal: false, isInternal: false },
       security: { passed: false, vulnerabilityAssessment: { newVulnerabilities: [], resolvedVulnerabilities: [], securityScoreChange: 0 }, securityHeaders: { added: [], improved: [], missing: [], securityStrength: 'weak' }, contentSecurityPolicy: { implemented: false, strength: '', violations: [] } },
       deploymentRecommendation: 'fix-issues',
       rollbackRequired: false,
@@ -278,7 +278,8 @@ export class EnhancedVerificationSystem {
 
       // Link verification
       console.log('Running link verification...');
-      result.links = await this.runLinkVerification(options);
+      const linkVerification = await this.runLinkVerification(options);
+      result.links = linkVerification.results.length > 0 ? linkVerification.results[0] : { page: '', href: '', resolvedUrl: '', text: '', status: null, passed: false, failureReason: 'No verification performed', isExternal: false, isInternal: false };
 
       // Security verification (for comprehensive+ levels)
       if (options.verificationLevel === 'comprehensive' || options.verificationLevel === 'exhaustive') {

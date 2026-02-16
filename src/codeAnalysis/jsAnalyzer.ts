@@ -420,7 +420,7 @@ export class JSAnalyzer {
           es6Features.push('template-literals');
         }
       },
-      VariableDeclaration(path) {
+      VariableDeclaration(path: any) {
         if (path.node.kind === 'const' || path.node.kind === 'let') {
           if (!es6Features.includes('let-const')) {
             es6Features.push('let-const');
@@ -443,7 +443,7 @@ export class JSAnalyzer {
           asyncPatterns.push('async-await');
         }
       },
-      FunctionDeclaration(path) {
+      FunctionDeclaration(path: any) {
         if (path.node.async && !asyncPatterns.includes('async-functions')) {
           asyncPatterns.push('async-functions');
         }
@@ -485,7 +485,7 @@ export class JSAnalyzer {
     const asyncOperations: Array<{ type: string; location: string; optimizable: boolean }> = [];
 
     traverse(ast, {
-      CallExpression(path) {
+      CallExpression(path: any) {
         const callee = path.node.callee;
         
         // Detect heavy DOM operations
@@ -510,7 +510,7 @@ export class JSAnalyzer {
         }
       },
 
-      FunctionDeclaration(path) {
+      FunctionDeclaration(path: any) {
         // Check for potentially unused functions
         // This would require more sophisticated analysis in practice
         if (path.node.id?.name.startsWith('unused')) {
@@ -580,20 +580,20 @@ export class JSAnalyzer {
     let eventListenerCount = 0;
 
     traverse(ast, {
-      VariableDeclaration(path) {
+      VariableDeclaration(path: any) {
         if (path.scope.block.type === 'Program') {
           globalVariableCount++;
         }
       },
 
-      FunctionDeclaration(path) {
+      FunctionDeclaration(path: any) {
         const name = path.node.id?.name;
         if (name && ['init', 'main', 'onload', 'ready'].includes(name)) {
           criticalFunctionCount++;
         }
       },
 
-      CallExpression(path) {
+      CallExpression(path: any) {
         if (path.node.callee.type === 'Identifier' && path.node.callee.name === 'eval') {
           dynamicEvalCount++;
         }
@@ -656,7 +656,7 @@ export class JSAnalyzer {
 
   private extractFunctionsAndVariables(ast: any, analysis: JSAnalysisResult) {
     traverse(ast, {
-      FunctionDeclaration(path) {
+      FunctionDeclaration(path: any) {
         const func = path.node;
         analysis.functions.push({
           name: func.id?.name || 'anonymous',
@@ -670,7 +670,7 @@ export class JSAnalyzer {
         });
       },
 
-      ArrowFunctionExpression(path) {
+      ArrowFunctionExpression(path: any) {
         analysis.functions.push({
           name: 'arrow function',
           type: 'arrow',
@@ -683,7 +683,7 @@ export class JSAnalyzer {
         });
       },
 
-      VariableDeclarator(path) {
+      VariableDeclarator(path: any) {
         const id = path.node.id;
         if (id.type === 'Identifier') {
           analysis.variables.push({
@@ -701,9 +701,9 @@ export class JSAnalyzer {
 
   private extractDependencies(ast: any, analysis: JSAnalysisResult) {
     traverse(ast, {
-      ImportDeclaration(path) {
+      ImportDeclaration(path: any) {
         const source = path.node.source.value;
-        const imported = path.node.specifiers.map(spec => {
+        const imported = path.node.specifiers.map((spec: any) => {
           if (spec.type === 'ImportDefaultSpecifier') return 'default';
           if (spec.type === 'ImportNamespaceSpecifier') return '*';
           return spec.imported?.name || 'unknown';
@@ -719,7 +719,7 @@ export class JSAnalyzer {
         });
       },
 
-      CallExpression(path) {
+      CallExpression(path: any) {
         if (path.node.callee.type === 'Identifier' && path.node.callee.name === 'require') {
           const arg = path.node.arguments[0];
           if (arg && arg.type === 'StringLiteral') {
@@ -903,8 +903,8 @@ export class JSAnalyzer {
 
   private calculateExpectedSavings(modifications: JSModification[]) {
     const sizeReduction = modifications.reduce((total, mod) => total + mod.estimatedSavings, 0);
-    const performanceImprovement = [];
-    const maintenanceImprovement = [];
+    const performanceImprovement: string[] = [];
+    const maintenanceImprovement: string[] = [];
 
     modifications.forEach(mod => {
       if (mod.impact === 'performance') {
