@@ -121,8 +121,9 @@ async function injectImageDimensionsAdvanced(
  */
 function optimizeFontDisplay(
   $: cheerio.CheerioAPI, 
-  strategy: 'optional' | 'swap' | 'fallback'
+  strategy: 'optional' | 'swap' | 'fallback' | 'block'
 ): number {
+  const displayValue = strategy === 'block' ? 'block' : strategy;
   let optimized = 0;
 
   // External font links (Google Fonts, etc.)
@@ -134,7 +135,7 @@ function optimizeFontDisplay(
       // Add font-display parameter to Google Fonts URL
       if (!href.includes('display=')) {
         const separator = href.includes('?') ? '&' : '?';
-        $link.attr('href', `${href}${separator}display=${strategy}`);
+        $link.attr('href', `${href}${separator}display=${displayValue}`);
         optimized++;
       }
     }
@@ -151,7 +152,7 @@ function optimizeFontDisplay(
       (match, inside) => {
         if (inside.includes('font-display:')) return match;
         optimized++;
-        return `@font-face{${inside.trim()};font-display:${strategy}}`;
+        return `@font-face{${inside.trim()};font-display:${displayValue}}`;
       }
     );
     
@@ -159,7 +160,7 @@ function optimizeFontDisplay(
   });
 
   // Add preload hints for critical fonts (reduces FOUT)
-  if (strategy === 'swap' || strategy === 'fallback') {
+  if (displayValue === 'swap' || displayValue === 'fallback') {
     const head = $('head');
     if (head.length) {
       // Add font metric override for system font fallback matching

@@ -384,7 +384,7 @@ const securitySettingsSchema = z.object({
   enableContentTypeOptions: z.boolean().default(true),
   enableReferrerPolicy: z.boolean().default(true),
   enablePermissionsPolicy: z.boolean().default(true),
-  cspDirectives: z.record(z.string()).default({
+  cspDirectives: z.record(z.string(), z.string()).default({
     'default-src': "'self'",
     'script-src': "'self' 'unsafe-inline'",
     'style-src': "'self' 'unsafe-inline'",

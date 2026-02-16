@@ -388,8 +388,9 @@ async function enrichWithHistoricalData(strategies: OptimizationStrategy[]): Pro
       GROUP BY optimization_type
     `);
 
+    const rows = Array.isArray(historicalData) ? historicalData : (historicalData as { rows?: unknown[] }).rows ?? [];
     for (const strategy of strategies) {
-      const data = historicalData.rows.find((row: any) => 
+      const data = rows.find((row: any) => 
         row.optimization_type === strategy.id || 
         row.optimization_type.includes(strategy.id.replace('-', '_'))
       );

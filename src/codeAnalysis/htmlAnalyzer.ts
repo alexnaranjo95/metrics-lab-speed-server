@@ -6,7 +6,8 @@
  */
 
 import { load } from 'cheerio';
-import type { CheerioAPI, Element } from 'cheerio';
+import type { CheerioAPI } from 'cheerio';
+import type { Element } from 'domhandler';
 
 export interface HTMLElement {
   tag: string;
@@ -875,8 +876,8 @@ export class HTMLAnalyzer {
     return { functionalTests, visualTests, accessibilityTests };
   }
 
-  private createRollbackPlan(modifications: HTMLModification[], analysis: HTMLAnalysisResult) {
-    const complexity = modifications.some(m => m.riskLevel === 'high') ? 'complex' : 'simple';
+  private createRollbackPlan(modifications: HTMLModification[], analysis: HTMLAnalysisResult): { complexity: 'simple' | 'moderate' | 'complex'; steps: string[]; verificationPoints: string[] } {
+    const complexity: 'simple' | 'moderate' | 'complex' = modifications.some(m => m.riskLevel === 'high') ? 'complex' : modifications.length > 3 ? 'moderate' : 'simple';
     
     return {
       complexity,

@@ -13,7 +13,8 @@ import { auditDiagnosticsEngine, type DiagnosticResult } from '../services/pages
 import { claudeJSON } from './claude.js';
 import { nanoid } from 'nanoid';
 import type { OptimizationWorkflow } from '../services/pagespeed/types.js';
-import type { SiteInventory, EnhancedOptimizationPlan, AgentReport } from './types.js';
+import type { SiteInventory, AgentReport } from './types.js';
+import type { EnhancedOptimizationPlan } from './planner.js';
 
 export interface EnhancedAgentOptions {
   siteId: string;

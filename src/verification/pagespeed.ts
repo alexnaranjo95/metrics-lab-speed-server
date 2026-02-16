@@ -58,7 +58,7 @@ export async function verifyPageSpeedOptimizations(
   results.push(...verifySEOOptimizations(optimizedData, originalData, log));
   
   // Security Headers Verification
-  results.push(...verifySecurityOptimizations(optimizedUrl, log));
+  results.push(...(await verifySecurityOptimizations(optimizedUrl, log)));
   
   // LCP Verification Tests
   results.push(...verifyLCPOptimizations(optimizedData, originalData, log));

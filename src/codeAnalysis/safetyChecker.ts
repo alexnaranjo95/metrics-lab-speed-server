@@ -5,7 +5,7 @@
  * analyzers to ensure modifications won't break website functionality or appearance.
  */
 
-import { htmlAnalyzer, type HTMLAnalysisResult, type HTMLModificationPlan } from './htmlAnalyzer.js';
+import { htmlAnalyzer, type HTMLAnalysisResult, type ModificationPlan as HTMLModificationPlan } from './htmlAnalyzer.js';
 import { cssAnalyzer, type CSSAnalysisResult, type CSSModificationPlan } from './cssAnalyzer.js';
 import { jsAnalyzer, type JSAnalysisResult, type JSModificationPlan } from './jsAnalyzer.js';
 import type { SiteProfile } from '../ai/learningEngine.js';

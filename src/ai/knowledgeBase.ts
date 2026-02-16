@@ -156,16 +156,18 @@ export class AIKnowledgeBase {
       });
 
       for (const pattern of patterns) {
-        const successRate = pattern.successfulApplications / pattern.timesApplied;
+        const successes = pattern.successfulApplications ?? 0;
+        const times = pattern.timesApplied ?? 0;
+        const successRate = times > 0 ? successes / times : 0;
         
         insights.push({
           insight: pattern.patternDescription,
-          confidence: pattern.confidence,
+          confidence: pattern.confidence ?? 0.5,
           applicableProfiles: this.extractApplicableProfiles(pattern),
           supportingEvidence: {
-            successfulCases: pattern.successfulApplications,
-            failedCases: pattern.timesApplied - pattern.successfulApplications,
-            averageImprovement: pattern.averageImprovement
+            successfulCases: successes,
+            failedCases: Math.max(0, times - successes),
+            averageImprovement: pattern.averageImprovement ?? 0
           },
           recommendations: this.generatePatternRecommendations(pattern)
         });
@@ -275,8 +277,8 @@ export class AIKnowledgeBase {
       const strategyStats = new Map<string, { successes: number; failures: number; improvements: number[] }>();
       
       for (const session of recentSessions) {
-        const strategies = session.successfulOptimizations || [];
-        const failures = session.failedOptimizations || [];
+        const strategies = Array.isArray(session.successfulOptimizations) ? session.successfulOptimizations as Array<{ type: string; impact: number }> : [];
+        const failures = Array.isArray(session.failedOptimizations) ? session.failedOptimizations as Array<{ type: string }> : [];
         
         // Process successful optimizations
         for (const success of strategies) {
@@ -425,8 +427,9 @@ export class AIKnowledgeBase {
     const recommendations: OptimizationRecommendation[] = [];
 
     for (const pattern of patterns) {
-      if (pattern.recommendedActions) {
-        for (const action of pattern.recommendedActions) {
+      const actions = Array.isArray(pattern.recommendedActions) ? pattern.recommendedActions : [];
+      if (actions.length > 0) {
+        for (const action of actions) {
           recommendations.push({
             strategy: action.action,
             confidence: action.confidence,
@@ -436,8 +439,8 @@ export class AIKnowledgeBase {
             reasoning: `Pattern-based recommendation: ${pattern.patternDescription}`,
             prerequisites: [],
             alternatives: [],
-            successRate: pattern.successfulApplications / Math.max(pattern.timesApplied, 1),
-            sampleSize: pattern.timesApplied
+            successRate: (pattern.successfulApplications ?? 0) / Math.max(pattern.timesApplied ?? 1, 1),
+            sampleSize: pattern.timesApplied ?? 0
           });
         }
       }

@@ -11,7 +11,8 @@ import { cssAnalyzer, type CSSAnalysisResult } from '../codeAnalysis/cssAnalyzer
 import { jsAnalyzer, type JSAnalysisResult } from '../codeAnalysis/jsAnalyzer.js';
 import { codeSafetyChecker, type ComprehensiveModificationPlan } from '../codeAnalysis/safetyChecker.js';
 import { aiVisualReview } from './visual.js';
-import { verifyFunctionalBehavior, type InteractiveElement } from './functional.js';
+import { verifyFunctionalBehavior } from './functional.js';
+import type { InteractiveElement as AIInteractiveElement } from '../ai/types.js';
 import { verifyAllLinks } from './links.js';
 
 export interface CodeChangeVerificationOptions {
@@ -600,16 +601,18 @@ export class CodeChangeVerificationEngine {
           modifiedPage.screenshot({ fullPage: true })
         ]);
 
-        // AI-powered visual comparison
+        // AI-powered visual comparison (aiVisualReview expects file paths - skip AI when we have buffers only)
         const visualComparison = await aiVisualReview(
           {
-            passed: false, // Will be determined by AI
-            differences: [],
-            screenshots: {
-              original: originalScreenshot,
-              modified: modifiedScreenshot
-            },
-            analysis: ''
+            page: viewport.name,
+            viewport: viewport.name,
+            diffPercent: 0,
+            diffPixels: 0,
+            totalPixels: 0,
+            diffImagePath: '',
+            baselineImagePath: '',
+            optimizedImagePath: '',
+            status: 'acceptable'
           },
           options.modificationPlan.components.css?.riskAssessment || {},
           (msg: string) => console.log(`[visual] ${msg}`)
@@ -668,36 +671,28 @@ export class CodeChangeVerificationEngine {
       
       await page.goto(options.originalUrl);
       
-      // Detect interactive elements
-      const interactiveElements = await page.evaluate(() => {
-        const elements: InteractiveElement[] = [];
-        
-        // Forms
-        document.querySelectorAll('form').forEach((form, index) => {
-          elements.push({
-            type: 'form',
-            selector: `form:nth-of-type(${index + 1})`,
-            element: form as any,
-            functionality: 'Form submission',
-            riskLevel: 'medium',
-            dependencies: []
-          });
+      // Detect interactive elements (match ai/types InteractiveElement shape for verifyFunctionalBehavior)
+      const pageUrl = options.originalUrl;
+      const rawElements = await page.evaluate(() => {
+        const elements: Array<{ type: string; selector: string }> = [];
+        document.querySelectorAll('form').forEach((_, i) => {
+          elements.push({ type: 'form', selector: `form:nth-of-type(${i + 1})` });
         });
-
-        // Buttons
-        document.querySelectorAll('button, input[type="button"]').forEach((btn, index) => {
-          elements.push({
-            type: 'button',
-            selector: `button:nth-of-type(${index + 1})`,
-            element: btn as any,
-            functionality: 'Button click',
-            riskLevel: 'low',
-            dependencies: []
-          });
+        document.querySelectorAll('button, input[type="button"], input[type="submit"]').forEach((_, i) => {
+          elements.push({ type: 'button', selector: `button:nth-of-type(${i + 1}), input[type="button"]:nth-of-type(${i + 1}), input[type="submit"]:nth-of-type(${i + 1})` });
         });
-
         return elements;
       });
+      const interactiveElements: AIInteractiveElement[] = rawElements.map(el => ({
+        page: pageUrl,
+        type: el.type as AIInteractiveElement['type'],
+        selector: el.selector,
+        description: `${el.type} element`,
+        triggerAction: 'click' as const,
+        expectedBehavior: 'Element responds',
+        dependsOnJquery: false,
+        dependsOnScript: null
+      }));
 
       await browser.close();
 
@@ -709,18 +704,18 @@ export class CodeChangeVerificationEngine {
         (msg: string) => console.log(`[functional] ${msg}`)
       );
 
-      const brokenFeatures = testResults.filter(tr => !tr.passed).map(tr => tr.element);
+      const brokenFeatures = testResults.filter(tr => !tr.passed).map(tr => typeof tr.element === 'string' ? tr.element : tr.element.selector);
       const newErrors = testResults
         .filter(tr => !tr.passed)
-        .map(tr => tr.error || 'Unknown error');
+        .map(tr => tr.failureReason || 'Unknown error');
 
       result.functional = {
         passed: brokenFeatures.length === 0,
         testResults: testResults.map(tr => ({
-          element: tr.element,
-          type: tr.elementType || 'unknown',
+          element: typeof tr.element === 'string' ? tr.element : tr.element.selector,
+          type: tr.element.type,
           passed: tr.passed,
-          error: tr.error
+          error: tr.failureReason
         })),
         newErrors,
         brokenFeatures

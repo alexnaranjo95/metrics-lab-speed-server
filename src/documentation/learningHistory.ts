@@ -279,7 +279,7 @@ async function analyzeSiteCharacteristics(site: any, build: any): Promise<Optimi
     complexity = 'simple';
   }
 
-  return { cms, theme, plugins, complexity };
+  return { cms, theme, plugins, complexity: complexity as 'simple' | 'moderate' | 'complex' };
 }
 
 function extractOptimizationAttempts(build: any): OptimizationLearning['optimizationAttempts'] {

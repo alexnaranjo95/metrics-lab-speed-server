@@ -244,7 +244,7 @@ function analyzePageSpeedAudits(pageSpeedData: OptimizationWorkflow): {
   pageSpeedData.opportunities?.forEach(opportunity => {
     const weight = performanceWeights[opportunity.id as keyof typeof performanceWeights] || 3;
     const impact = weight >= 20 ? 'high' : weight >= 8 ? 'medium' : 'low';
-    const estimatedImprovement = Math.min(weight, (1 - opportunity.score) * weight);
+    const estimatedImprovement = Math.min(weight, (1 - (opportunity.score ?? 0)) * weight);
 
     audits.push({
       auditId: opportunity.id,

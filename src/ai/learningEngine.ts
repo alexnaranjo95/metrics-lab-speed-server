@@ -201,7 +201,7 @@ export class AILearningEngine {
           averageImprovement: outcome.improvement,
           sampleSize: 1,
           requiredSettings: solution.settings,
-          codeChangesRequired: solution.codeChanges,
+          codeChangesRequired: solution.codeChanges as { files: string[]; modifications: Array<{ type: 'add' | 'modify' | 'remove'; target: string; description: string }>; reversible: boolean } | null,
           riskLevel: this.assessRiskLevel(solution, siteProfile),
           commonFailureReasons: outcome.success ? [] : [outcome.failureReason || 'Unknown'],
         });

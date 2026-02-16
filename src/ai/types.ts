@@ -188,7 +188,7 @@ export interface OptimizationPlan {
   settings: Record<string, any>;
   reasoning: Record<string, string>;
   risks: string[];
-  expectedPerformance: { lighthouse: number; lcp: string; cls: string };
+  expectedPerformance: { lighthouse: number; lcp: string; cls: string; seo?: number; bestPractices?: number };
 }
 
 export interface IterationResult {

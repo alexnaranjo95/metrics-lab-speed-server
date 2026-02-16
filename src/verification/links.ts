@@ -1,6 +1,8 @@
 import { chromium } from 'playwright';
 import type { PageInventory, LinkVerificationResult } from '../ai/types.js';
 
+export type { LinkVerificationResult };
+
 export async function verifyAllLinks(
   originalUrl: string,
   optimizedUrl: string,

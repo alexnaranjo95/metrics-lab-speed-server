@@ -562,6 +562,11 @@ function generateSeoAuditsDocs(): PageSpeedAudit[] {
         manual: ['Review titles for uniqueness and relevance']
       },
       examples: {
+        failureScenarios: [
+          'Missing or empty title element',
+          'Generic titles like "Home" or "Untitled"',
+          'Duplicate titles across pages'
+        ],
         beforeAfter: {
           before: '<title>Home</title> (generic, non-descriptive)',
           after: '<title>Professional Web Design Services | YourCompany</title>',

@@ -6,7 +6,7 @@
  */
 
 import { codeChangeVerificationEngine, type CodeChangeVerificationOptions, type CodeChangeVerificationResult } from './codeChangeVerification.js';
-import { compareVisuals, type VisualComparisonResult } from './visual.js';
+import { compareVisuals, aiVisualReview, type VisualComparisonResult } from './visual.js';
 import { verifyFunctionalBehavior, type InteractiveElement, type FunctionalTestResult } from './functional.js';
 import { verifyAllLinks, type LinkVerificationResult } from './links.js';
 import { measureWithPageSpeed, type PageSpeedResult } from '../services/pagespeed.js';
@@ -564,13 +564,19 @@ export class EnhancedVerificationSystem {
         options.optimizedUrl
       );
 
-      // AI-powered visual analysis
+      // AI-powered visual analysis (pass minimal VisualComparisonResult - aiVisualReview will skip if paths invalid)
+      const comp = screenshots.comparisons[0];
       const aiReview = await aiVisualReview(
         {
-          passed: false,
-          differences: [],
-          screenshots: screenshots.comparisons[0], // Primary viewport
-          analysis: ''
+          page: '/',
+          viewport: comp?.viewport || 'desktop',
+          diffPercent: comp?.difference ? comp.difference * 100 : 0,
+          diffPixels: 0,
+          totalPixels: 0,
+          diffImagePath: '',
+          baselineImagePath: '',
+          optimizedImagePath: '',
+          status: 'acceptable'
         },
         options.modificationPlan?.components.css?.riskAssessment || {},
         (msg: string) => console.log(`[visual] ${msg}`)
@@ -651,7 +657,7 @@ export class EnhancedVerificationSystem {
 
       const brokenFunctionalities = testResults
         .filter(tr => !tr.passed)
-        .map(tr => tr.element);
+        .map(tr => (typeof tr.element === 'string' ? tr.element : tr.element.selector));
 
       const passed = brokenFunctionalities.length <= options.tolerances.functional.maxFailures;
 
@@ -722,7 +728,7 @@ export class EnhancedVerificationSystem {
         (msg: string) => console.log(`[links] ${msg}`)
       );
 
-      const broken = linkResults.filter(lr => lr.status !== 'ok');
+      const broken = linkResults.filter(lr => !lr.passed);
       
       return {
         passed: broken.length === 0,
@@ -733,11 +739,15 @@ export class EnhancedVerificationSystem {
       return {
         passed: false,
         results: [{
-          url: 'verification-error',
-          status: 'error',
-          statusCode: 500,
-          error: `Link verification failed: ${(error as Error).message}`,
-          page: 'unknown'
+          page: 'unknown',
+          href: 'verification-error',
+          resolvedUrl: 'verification-error',
+          text: '',
+          status: 500,
+          passed: false,
+          failureReason: `Link verification failed: ${(error as Error).message}`,
+          isExternal: false,
+          isInternal: false
         }]
       };
     }

@@ -568,12 +568,17 @@ async function generatePerformanceOverview(): Promise<SystemOverviewResult['perf
       db.execute(sql`SELECT COUNT(*) as count FROM sites WHERE status = 'active'`)
     ]);
 
+    const tb = Array.isArray(totalBuilds) ? totalBuilds : (totalBuilds as { rows?: unknown[] }).rows ?? [];
+    const sb = Array.isArray(successfulBuilds) ? successfulBuilds : (successfulBuilds as { rows?: unknown[] }).rows ?? [];
+    const avgRows = Array.isArray(avgScoreImprovement) ? avgScoreImprovement : (avgScoreImprovement as { rows?: unknown[] }).rows ?? [];
+    const tsRows = Array.isArray(totalSites) ? totalSites : (totalSites as { rows?: unknown[] }).rows ?? [];
+    const asRows = Array.isArray(activeSites) ? activeSites : (activeSites as { rows?: unknown[] }).rows ?? [];
     const systemMetrics: SystemMetrics = {
       uptime: process.uptime(),
-      totalOptimizations: (totalBuilds.rows[0] as any)?.count || 0,
-      successfulOptimizations: (successfulBuilds.rows[0] as any)?.count || 0,
+      totalOptimizations: (tb[0] as any)?.count || 0,
+      successfulOptimizations: (sb[0] as any)?.count || 0,
       averageOptimizationTime: 180, // 3 minutes average
-      averagePerformanceImprovement: parseFloat((avgScoreImprovement.rows[0] as any)?.avg_improvement) || 0,
+      averagePerformanceImprovement: parseFloat((avgRows[0] as any)?.avg_improvement) || 0,
       queueHealth: {
         activeJobs: 0, // Would get from Redis/BullMQ
         pendingJobs: 0,
@@ -587,8 +592,8 @@ async function generatePerformanceOverview(): Promise<SystemOverviewResult['perf
     };
 
     const optimizationStats: OptimizationStats = {
-      totalSites: (totalSites.rows[0] as any)?.count || 0,
-      activeSites: (activeSites.rows[0] as any)?.count || 0,
+      totalSites: (tsRows[0] as any)?.count || 0,
+      activeSites: (asRows[0] as any)?.count || 0,
       totalBuilds: systemMetrics.totalOptimizations,
       successfulBuilds: systemMetrics.successfulOptimizations,
       averageScoreImprovement: systemMetrics.averagePerformanceImprovement,

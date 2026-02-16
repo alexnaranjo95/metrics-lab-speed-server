@@ -1,4 +1,5 @@
 import { pgTable, text, integer, bigint, timestamp, jsonb, index, uuid, boolean, real } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { relations } from 'drizzle-orm';
 import type { SettingsOverride, OptimizationSettings } from '../shared/settingsSchema.js';
 
@@ -434,6 +435,7 @@ export const aiOptimizationSessions = pgTable('ai_optimization_sessions', {
   successfulOptimizations: jsonb('successful_optimizations'), // What worked
   failedOptimizations: jsonb('failed_optimizations'), // What didn't work
   aiReasonings: jsonb('ai_reasonings'), // AI explanations for decisions
+  lessonsLearned: jsonb('lessons_learned').$type<string[]>(), // AI learnings from session
   
   // Resource usage
   totalTokensUsed: integer('total_tokens_used').default(0),
