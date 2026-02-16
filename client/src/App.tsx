@@ -1,8 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-
-// Must match Vite base for subpath deployment (e.g. VITE_BASE_PATH=/app/)
-const basename = import.meta.env.BASE_URL.replace(/\/*$/, '') || undefined;
 import { Shell } from './components/layout/Shell';
 import { DashboardPage } from './pages/DashboardPage';
 import { SitePage } from './pages/SitePage';
@@ -24,7 +21,7 @@ const queryClient = new QueryClient({
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter basename={basename}>
+      <BrowserRouter>
         <Routes>
           <Route element={<Shell />}>
             <Route path="/" element={<DashboardPage />} />

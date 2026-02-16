@@ -93,7 +93,10 @@ async function start() {
   }));
 
   // Serve React SPA if client/dist exists (works in Docker and local builds)
-  const clientDistPath = path.join(__dirname, '../client/dist');
+  // In Docker: CWD=/app, dist/index.js runs → __dirname=/app/dist; client lives at /app/client/dist
+  const clientDistPath = fs.existsSync(path.join(process.cwd(), 'client', 'dist'))
+    ? path.join(process.cwd(), 'client', 'dist')
+    : path.join(__dirname, '../client/dist');
   const clientDistExists = fs.existsSync(path.join(clientDistPath, 'index.html'));
 
   console.log(`SPA serving: ${clientDistExists ? 'ENABLED' : 'DISABLED (client/dist/index.html not found)'}`);
@@ -110,6 +113,8 @@ async function start() {
       maxAge: '1y',
       immutable: true,
     });
+    // Explicitly serve index.html for root (SPA entry)
+    app.get('/', async (_, reply) => reply.sendFile('index.html', clientDistPath));
   }
 
   // Register API routes
@@ -124,15 +129,10 @@ async function start() {
   await app.register(webhookRoutes, { prefix: '/webhooks' });
   await app.register(websocketRoutes);
 
-  // SPA fallback: serve index.html for non-API routes (don't serve HTML for asset 404s)
+  // SPA fallback: serve index.html for all non-API, non-WS routes
   if (clientDistExists) {
     app.setNotFoundHandler(async (req, reply) => {
-      const url = req.url.split('?')[0];
-      if (url.startsWith('/api/') || url.startsWith('/ws/') || url.startsWith('/webhooks/')) {
-        return reply.code(404).send({ error: 'Not found' });
-      }
-      // Don't serve index.html for asset requests—return 404 so the browser gets proper errors
-      if (/\.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot)(\?|$)/i.test(url)) {
+      if (req.url.startsWith('/api/') || req.url.startsWith('/ws/') || req.url.startsWith('/webhooks/')) {
         return reply.code(404).send({ error: 'Not found' });
       }
       return reply.sendFile('index.html');
