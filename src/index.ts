@@ -124,10 +124,15 @@ async function start() {
   await app.register(webhookRoutes, { prefix: '/webhooks' });
   await app.register(websocketRoutes);
 
-  // SPA fallback: serve index.html for all non-API, non-WS routes
+  // SPA fallback: serve index.html for non-API routes (don't serve HTML for asset 404s)
   if (clientDistExists) {
     app.setNotFoundHandler(async (req, reply) => {
-      if (req.url.startsWith('/api/') || req.url.startsWith('/ws/') || req.url.startsWith('/webhooks/')) {
+      const url = req.url.split('?')[0];
+      if (url.startsWith('/api/') || url.startsWith('/ws/') || url.startsWith('/webhooks/')) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
+      // Don't serve index.html for asset requests—return 404 so the browser gets proper errors
+      if (/\.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot)(\?|$)/i.test(url)) {
         return reply.code(404).send({ error: 'Not found' });
       }
       return reply.sendFile('index.html');
