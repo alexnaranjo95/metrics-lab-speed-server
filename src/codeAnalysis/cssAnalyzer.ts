@@ -243,7 +243,7 @@ export class CSSAnalyzer {
     const nonCriticalRules: any[] = [];
 
     // Separate critical from non-critical rules
-    this.traverseRules(ast.stylesheet.rules, (rule: any) => {
+    this.traverseRules(ast.stylesheet?.rules || [], (rule: any) => {
       if (this.isCriticalRule(rule, analysis.critical)) {
         criticalRules.push(rule);
       } else {
@@ -298,7 +298,7 @@ export class CSSAnalyzer {
     const keptRules: any[] = [];
 
     // Filter rules based on usage
-    this.traverseRules(ast.stylesheet.rules, (rule: any) => {
+    this.traverseRules(ast.stylesheet?.rules || [], (rule: any) => {
       if (this.shouldKeepRule(rule, usageData, options)) {
         keptRules.push(rule);
       } else {

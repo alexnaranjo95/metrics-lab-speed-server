@@ -293,16 +293,16 @@ export class HTMLAnalyzer {
     if (!this.$) throw new Error('HTML not loaded');
 
     const doctype = this.extractDoctype();
-    const html = this.$('html');
-    const head = this.$('head');
-    const body = this.$('body');
+    const html = this.$!('html');
+    const head = this.$!('head');
+    const body = this.$!('body');
 
     return {
       doctype,
       language: html.attr('lang') || '',
       head: this.elementToObject(head.get(0)),
       body: this.elementToObject(body.get(0)),
-      totalElements: this.$('*').length,
+      totalElements: this.$!('*').length,
       maxDepth: this.calculateMaxDepth()
     };
   }
@@ -314,7 +314,7 @@ export class HTMLAnalyzer {
 
     // Scripts  
     this.$?.('script').each((_, el) => {
-      const $el = this.$(el);
+      const $el = this.$!(el);
       const src = $el.attr('src');
       dependencies.push({
         type: 'script',
@@ -328,7 +328,7 @@ export class HTMLAnalyzer {
 
     // Stylesheets
     this.$?.('link[rel="stylesheet"], style').each((_, el) => {
-      const $el = this.$(el);
+      const $el = this.$!(el);
       const href = $el.attr('href');
       dependencies.push({
         type: 'style',
@@ -342,7 +342,7 @@ export class HTMLAnalyzer {
 
     // Images
     this.$?.('img').each((_, el) => {
-      const $el = this.$(el);
+      const $el = this.$!(el);
       const src = $el.attr('src');
       dependencies.push({
         type: 'image',
@@ -388,7 +388,7 @@ export class HTMLAnalyzer {
 
     // Links
     this.$?.('a[href]').each((_, el) => {
-      const $el = this.$(el);
+      const $el = this.$!(el);
       interactive.push({
         type: 'link',
         selector: this.generateSelector(el),
@@ -401,7 +401,7 @@ export class HTMLAnalyzer {
 
     // Detect common interactive patterns
     this.$?.('[class*="modal"], [class*="dropdown"], [class*="slider"], [class*="carousel"]').each((_, el) => {
-      const className = this.$(el).attr('class') || '';
+      const className = this.$!(el).attr('class') || '';
       let type: InteractiveElement['type'] = 'dropdown';
       
       if (className.includes('modal')) type = 'modal';
@@ -424,11 +424,11 @@ export class HTMLAnalyzer {
     if (!this.$) return { openGraph: {}, twitterCard: {} };
 
     return {
-      title: this.$('title').text(),
-      description: this.$('meta[name="description"]').attr('content'),
-      viewport: this.$('meta[name="viewport"]').attr('content'),
-      charset: this.$('meta[charset]').attr('charset') || this.$('meta[http-equiv="Content-Type"]').attr('content'),
-      canonicalUrl: this.$('link[rel="canonical"]').attr('href'),
+      title: this.$!('title').text(),
+      description: this.$!('meta[name="description"]').attr('content'),
+      viewport: this.$!('meta[name="viewport"]').attr('content'),
+      charset: this.$!('meta[charset]').attr('charset') || this.$!('meta[http-equiv="Content-Type"]').attr('content'),
+      canonicalUrl: this.$!('link[rel="canonical"]').attr('href'),
       openGraph: this.extractOpenGraphTags(),
       twitterCard: this.extractTwitterCardTags()
     };
@@ -439,8 +439,8 @@ export class HTMLAnalyzer {
 
     const images: HTMLAnalysisResult['images'] = [];
 
-    this.$('img').each((_, el) => {
-      const $el = this.$(el);
+    this.$!('img').each((_, el) => {
+      const $el = this.$!(el);
       const src = $el.attr('src') || '';
       const width = $el.attr('width');
       const height = $el.attr('height');
@@ -499,9 +499,9 @@ export class HTMLAnalyzer {
   private calculateSafetyMetrics(): HTMLAnalysisResult['safetyMetrics'] {
     if (!this.$) return { modificationRiskScore: 100, criticalElementsCount: 0, externalDependenciesCount: 0, complexInteractionsCount: 0 };
 
-    const criticalElements = this.$('script[src], link[rel="stylesheet"], form, [onclick], [onload]').length;
-    const externalDeps = this.$('script[src*="//"], link[href*="//"], img[src*="//"]').length;
-    const complexInteractions = this.$('[class*="modal"], [class*="dropdown"], [class*="slider"], [data-toggle], [data-target]').length;
+    const criticalElements = this.$!('script[src], link[rel="stylesheet"], form, [onclick], [onload]').length;
+    const externalDeps = this.$!('script[src*="//"], link[href*="//"], img[src*="//"]').length;
+    const complexInteractions = this.$!('[class*="modal"], [class*="dropdown"], [class*="slider"], [data-toggle], [data-target]').length;
 
     // Calculate risk score (lower is safer)
     let riskScore = 0;
@@ -523,7 +523,7 @@ export class HTMLAnalyzer {
   private elementToObject(element: any): HTMLElement {
     if (!element) return { tag: '', attributes: {}, children: [], selector: '' };
 
-    const $el = this.$(element);
+    const $el = this.$!(element);
     const tag = element.tagName?.toLowerCase() || '';
     
     return {
@@ -544,7 +544,7 @@ export class HTMLAnalyzer {
   }
 
   private generateSelector(element: any): string {
-    const $el = this.$(element);
+    const $el = this.$!(element);
     const tag = element.tagName?.toLowerCase() || '';
     const id = $el.attr('id');
     const className = $el.attr('class');
@@ -555,7 +555,7 @@ export class HTMLAnalyzer {
   }
 
   private isElementInHead(element: any): boolean {
-    return this.$(element).closest('head').length > 0;
+    return this.$!(element).closest('head').length > 0;
   }
 
   private isExternalUrl(url: string): boolean {
@@ -564,12 +564,12 @@ export class HTMLAnalyzer {
 
   private isAboveFold(element: any): boolean {
     // Simplified - in real implementation would consider viewport
-    return this.$(element).index() < 5;
+    return this.$!(element).index() < 5;
   }
 
   private extractElementDependencies(element: any): string[] {
     const deps: string[] = [];
-    const $el = this.$(element);
+    const $el = this.$!(element);
     
     // CSS classes
     const className = $el.attr('class');
@@ -588,13 +588,13 @@ export class HTMLAnalyzer {
   }
 
   private findImagesWithoutAlt(): HTMLElement[] {
-    return this.$('img:not([alt])').map((_, el) => this.elementToObject(el)).get();
+    return this.$!('img:not([alt])').map((_, el) => this.elementToObject(el)).get();
   }
 
   private findUnlabeledFormElements(): HTMLElement[] {
     return this.$('input:not([aria-label]):not([aria-labelledby]), select:not([aria-label]):not([aria-labelledby]), textarea:not([aria-label]):not([aria-labelledby])')
       .filter((_, el) => {
-        const $el = this.$(el);
+        const $el = this.$!(el);
         const id = $el.attr('id');
         return !id || this.$(`label[for="${id}"]`).length === 0;
       })
@@ -623,36 +623,36 @@ export class HTMLAnalyzer {
   private checkMissingLandmarks(): string[] {
     const missing: string[] = [];
     
-    if (this.$('main, [role="main"]').length === 0) missing.push('main');
-    if (this.$('nav, [role="navigation"]').length === 0) missing.push('navigation');
-    if (this.$('header, [role="banner"]').length === 0) missing.push('header');
-    if (this.$('footer, [role="contentinfo"]').length === 0) missing.push('footer');
+    if (this.$!('main, [role="main"]').length === 0) missing.push('main');
+    if (this.$!('nav, [role="navigation"]').length === 0) missing.push('navigation');
+    if (this.$!('header, [role="banner"]').length === 0) missing.push('header');
+    if (this.$!('footer, [role="contentinfo"]').length === 0) missing.push('footer');
     
     return missing;
   }
 
   private findRenderBlockingResources(): HTMLElement[] {
-    return this.$('head script:not([async]):not([defer]), head link[rel="stylesheet"]:not([media="print"])')
+    return this.$!('head script:not([async]):not([defer]), head link[rel="stylesheet"]:not([media="print"])')
       .map((_, el) => this.elementToObject(el)).get();
   }
 
   private findLargeInlineStyles(): HTMLElement[] {
-    return this.$('style').filter((_, el) => {
-      const content = this.$(el).html() || '';
+    return this.$!('style').filter((_, el) => {
+      const content = this.$!(el).html() || '';
       return content.length > 1000; // Styles larger than 1KB
     }).map((_, el) => this.elementToObject(el)).get();
   }
 
   private findLargeInlineScripts(): HTMLElement[] {
-    return this.$('script:not([src])').filter((_, el) => {
-      const content = this.$(el).html() || '';
+    return this.$!('script:not([src])').filter((_, el) => {
+      const content = this.$!(el).html() || '';
       return content.length > 1000; // Scripts larger than 1KB
     }).map((_, el) => this.elementToObject(el)).get();
   }
 
   private findUnoptimizedImages(): HTMLElement[] {
-    return this.$('img').filter((_, el) => {
-      const $el = this.$(el);
+    return this.$!('img').filter((_, el) => {
+      const $el = this.$!(el);
       const src = $el.attr('src') || '';
       
       // Check for unoptimized formats
@@ -667,7 +667,7 @@ export class HTMLAnalyzer {
     // Check for missing preconnect to external domains
     const externalDomains = new Set<string>();
     this.$('script[src*="//"], link[href*="//"], img[src*="//"]').each((_, el) => {
-      const $el = this.$(el);
+      const $el = this.$!(el);
       const url = $el.attr('src') || $el.attr('href') || '';
       try {
         const domain = new URL(url).hostname;
@@ -676,7 +676,7 @@ export class HTMLAnalyzer {
     });
 
     externalDomains.forEach(domain => {
-      if (this.$(`link[rel="preconnect"][href*="${domain}"]`).length === 0) {
+        if (this.$!(`link[rel="preconnect"][href*="${domain}"]`).length === 0) {
         missing.push(`preconnect to ${domain}`);
       }
     });
@@ -692,8 +692,8 @@ export class HTMLAnalyzer {
   private calculateMaxDepth(): number {
     let maxDepth = 0;
     
-    this.$('*').each((_, el) => {
-      const depth = this.$(el).parents().length;
+    this.$!('*').each((_, el) => {
+      const depth = this.$!(el).parents().length;
       maxDepth = Math.max(maxDepth, depth);
     });
     
@@ -703,9 +703,9 @@ export class HTMLAnalyzer {
   private extractOpenGraphTags(): Record<string, string> {
     const og: Record<string, string> = {};
     
-    this.$('meta[property^="og:"]').each((_, el) => {
-      const property = this.$(el).attr('property')?.replace('og:', '');
-      const content = this.$(el).attr('content');
+    this.$!('meta[property^="og:"]').each((_, el) => {
+      const property = this.$!(el).attr('property')?.replace('og:', '');
+      const content = this.$!(el).attr('content');
       if (property && content) {
         og[property] = content;
       }
@@ -717,9 +717,9 @@ export class HTMLAnalyzer {
   private extractTwitterCardTags(): Record<string, string> {
     const twitter: Record<string, string> = {};
     
-    this.$('meta[name^="twitter:"]').each((_, el) => {
-      const name = this.$(el).attr('name')?.replace('twitter:', '');
-      const content = this.$(el).attr('content');
+    this.$!('meta[name^="twitter:"]').each((_, el) => {
+      const name = this.$!(el).attr('name')?.replace('twitter:', '');
+      const content = this.$!(el).attr('content');
       if (name && content) {
         twitter[name] = content;
       }

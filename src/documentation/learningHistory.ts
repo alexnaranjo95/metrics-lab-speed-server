@@ -274,9 +274,9 @@ async function analyzeSiteCharacteristics(site: any, build: any): Promise<Optimi
 
   // Determine complexity based on page count and build duration
   if (build.pagesTotal > 50 || plugins.length > 10) {
-    complexity = 'complex' as const;
+    complexity = 'complex';
   } else if (build.pagesTotal < 10 && plugins.length < 3) {
-    complexity = 'simple' as const;
+    complexity = 'simple';
   }
 
   return { cms, theme, plugins, complexity };
