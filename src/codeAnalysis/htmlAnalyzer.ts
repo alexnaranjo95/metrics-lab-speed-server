@@ -592,11 +592,11 @@ export class HTMLAnalyzer {
   }
 
   private findUnlabeledFormElements(): HTMLElement[] {
-    return this.$('input:not([aria-label]):not([aria-labelledby]), select:not([aria-label]):not([aria-labelledby]), textarea:not([aria-label]):not([aria-labelledby])')
+    return this.$!('input:not([aria-label]):not([aria-labelledby]), select:not([aria-label]):not([aria-labelledby]), textarea:not([aria-label]):not([aria-labelledby])')
       .filter((_, el) => {
         const $el = this.$!(el);
         const id = $el.attr('id');
-        return !id || this.$(`label[for="${id}"]`).length === 0;
+        return !id || this.$!(`label[for="${id}"]`).length === 0;
       })
       .map((_, el) => this.elementToObject(el)).get();
   }
@@ -605,7 +605,7 @@ export class HTMLAnalyzer {
     const issues: Array<{ expected: string; actual: string; element: HTMLElement }> = [];
     let expectedLevel = 1;
 
-    this.$('h1, h2, h3, h4, h5, h6').each((_, el) => {
+    this.$!('h1, h2, h3, h4, h5, h6').each((_, el) => {
       const actualLevel = parseInt(el.tagName.slice(1));
       if (actualLevel > expectedLevel + 1) {
         issues.push({
@@ -666,7 +666,7 @@ export class HTMLAnalyzer {
     
     // Check for missing preconnect to external domains
     const externalDomains = new Set<string>();
-    this.$('script[src*="//"], link[href*="//"], img[src*="//"]').each((_, el) => {
+    this.$!('script[src*="//"], link[href*="//"], img[src*="//"]').each((_, el) => {
       const $el = this.$!(el);
       const url = $el.attr('src') || $el.attr('href') || '';
       try {

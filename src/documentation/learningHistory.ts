@@ -260,7 +260,7 @@ async function analyzeSiteCharacteristics(site: any, build: any): Promise<Optimi
   let cms = 'unknown';
   let theme = 'unknown';
   let plugins: string[] = [];
-  let complexity = 'moderate' as const;
+  let complexity: OptimizationLearning['siteCharacteristics']['complexity'] = 'moderate';
 
   // Extract characteristics from build log
   for (const entry of buildLog) {

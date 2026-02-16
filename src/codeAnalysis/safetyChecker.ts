@@ -530,7 +530,7 @@ export class CodeSafetyChecker {
         });
       }
 
-      if (change.impact === 'accessibility' && analysis?.accessibility.missingAltImages.length > 10) {
+      if (change.impact === 'accessibility' && (analysis?.accessibility.missingAltImages?.length ?? 0) > 10) {
         risks.push({
           severity: 'medium',
           category: 'functional',
