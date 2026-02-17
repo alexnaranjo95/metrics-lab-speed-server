@@ -98,6 +98,7 @@ async function start() {
     ? path.join(process.cwd(), 'client', 'dist')
     : path.join(__dirname, '../client/dist');
   const clientDistExists = fs.existsSync(path.join(clientDistPath, 'index.html'));
+  const indexHtmlOptions = { maxAge: 0, immutable: false };
 
   console.log(`SPA serving: ${clientDistExists ? 'ENABLED' : 'DISABLED (client/dist/index.html not found)'}`);
   console.log(`NODE_ENV: ${config.NODE_ENV}`);
@@ -114,7 +115,10 @@ async function start() {
       immutable: true,
     });
     // Explicitly serve index.html for root (SPA entry)
-    app.get('/', async (_, reply) => reply.sendFile('index.html', clientDistPath));
+    // Never cache index.html to avoid stale HTML pointing to old asset hashes after deploys
+    app.get('/', async (_, reply) =>
+      reply.sendFile('index.html', clientDistPath, indexHtmlOptions)
+    );
   }
 
   // Register API routes
@@ -135,7 +139,7 @@ async function start() {
       if (req.url.startsWith('/api/') || req.url.startsWith('/ws/') || req.url.startsWith('/webhooks/')) {
         return reply.code(404).send({ error: 'Not found' });
       }
-      return reply.sendFile('index.html');
+      return reply.sendFile('index.html', clientDistPath, indexHtmlOptions);
     });
   }
 

@@ -42,12 +42,8 @@ export function Shell() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex h-14 items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
-              <Link to="/" className="flex items-center shrink-0" title="Metrics Lab">
-                <img
-                  src="/metrics-lab-logo.png"
-                  alt="Metrics Lab"
-                  className="h-5 w-auto"
-                />
+              <Link to="/" className="flex items-center shrink-0 font-semibold text-[hsl(var(--foreground))] text-base" title="Metrics Lab">
+                Metrics Lab
               </Link>
               {breadcrumbs.length > 0 && (
                 <nav className="flex items-center gap-1 text-sm min-w-0">
