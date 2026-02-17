@@ -13,7 +13,7 @@ import {
   Loader2,
   Gauge,
   Bug,
-  ImageDiff,
+  FileDiff,
   Wifi,
   WifiOff,
   ChevronDown,
@@ -306,7 +306,7 @@ export function LiveEditPage() {
                   : 'bg-violet-600/20 text-violet-700 dark:text-violet-400 hover:bg-violet-600/30'
               )}
             >
-              {auditMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageDiff className="h-3.5 w-3.5" />}
+              {auditMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDiff className="h-3.5 w-3.5" />}
               Visual Diff
             </button>
             <button
