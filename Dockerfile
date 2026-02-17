@@ -41,6 +41,9 @@ COPY --from=server-builder /app/drizzle ./drizzle
 # Copy built React SPA from client builder
 COPY --from=client-builder /app/client/dist ./client/dist
 
-EXPOSE 3002
+# PORT can be set by Coolify via build-arg or runtime env; default 3002
+ARG PORT=3002
+ENV PORT=$PORT
+EXPOSE ${PORT}
 
 CMD ["node", "dist/index.js"]
