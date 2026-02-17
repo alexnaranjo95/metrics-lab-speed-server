@@ -8,6 +8,7 @@ import { BuildPage } from './pages/BuildPage';
 import { AgentPage } from './pages/AgentPage';
 import { PerformancePage } from './pages/PerformancePage';
 import { ReportPage } from './pages/ReportPage';
+import { LiveEditPage } from './pages/LiveEditPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,6 +29,7 @@ export default function App() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/sites/:siteId" element={<SitePage />} />
             <Route path="/sites/:siteId/ai" element={<AgentPage />} />
+            <Route path="/sites/:siteId/live-edit" element={<LiveEditPage />} />
             <Route path="/sites/:siteId/builds" element={<BuildHistoryPage />} />
             <Route path="/sites/:siteId/builds/:buildId" element={<BuildPage />} />
             <Route path="/sites/:siteId/performance" element={<PerformancePage />} />

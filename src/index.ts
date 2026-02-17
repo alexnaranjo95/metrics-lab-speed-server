@@ -17,6 +17,7 @@ import { aiAgentRoutes } from './api/aiAgent.js';
 import { performanceRoutes } from './api/performance.js';
 import { documentationRoutes } from './documentation/index.js';
 import { aiLearningRoutes } from './api/aiLearning.js';
+import { liveEditRoutes } from './api/liveEdit.js';
 import { initializeLearningIntegration, scheduleContinuousLearning } from './ai/learningIntegration.js';
 import { buildWorker } from './queue/buildWorker.js';
 import { agentWorker } from './queue/agentWorker.js';
@@ -132,6 +133,7 @@ async function start() {
   await app.register(performanceRoutes, { prefix: '/api' });
   await app.register(documentationRoutes, { prefix: '/api' });
   await app.register(aiLearningRoutes, { prefix: '/api' });
+  await app.register(liveEditRoutes, { prefix: '/api' });
   await app.register(webhookRoutes, { prefix: '/webhooks' });
   await app.register(websocketRoutes);
 

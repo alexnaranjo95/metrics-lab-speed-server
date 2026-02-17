@@ -111,6 +111,8 @@ function buildBreadcrumbs(
     crumbs.push({ label: 'Performance', path: pathname });
   } else if (pathname.includes('/ai')) {
     crumbs.push({ label: 'AI Agent', path: pathname });
+  } else if (pathname.includes('/live-edit')) {
+    crumbs.push({ label: 'Live Edit', path: pathname });
   }
 
   return crumbs;

@@ -186,6 +186,27 @@ export const api = {
   stopAgent: (siteId: string) =>
     fetchJson<{ stopped: boolean }>(`/sites/${siteId}/ai/stop`, { method: 'POST', body: '{}' }),
 
+  // Live Edit
+  getLiveEditStatus: (siteId: string) =>
+    fetchJson<{ hasWorkspace: boolean; edgeUrl: string | null; canEdit: boolean }>(
+      `/sites/${siteId}/live-edit/status`
+    ),
+  liveEditChat: (siteId: string, message: string) =>
+    fetchJson<{ applied: boolean; deployed?: boolean }>(`/sites/${siteId}/live-edit/chat`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
+  liveEditAudit: (siteId: string, type: 'speed' | 'bugs' | 'visual') =>
+    fetchJson<any>(`/sites/${siteId}/live-edit/audit`, {
+      method: 'POST',
+      body: JSON.stringify({ type }),
+    }),
+  liveEditDeploy: (siteId: string) =>
+    fetchJson<{ url: string; deployed: boolean }>(`/sites/${siteId}/live-edit/deploy`, {
+      method: 'POST',
+      body: '{}',
+    }),
+
   // Performance Comparison
   performance: {
     getComparison: (siteId: string) =>

@@ -283,6 +283,17 @@ export async function runBuildPipeline(
     buildEmitter.emitComplete(buildId, true);
     buildEmitter.log(buildId, 'deploy', 'info', 'Build completed successfully');
 
+    // Persist build output for Live Edit workspace
+    const liveEditDir = process.env.LIVE_EDIT_WORKSPACE_DIR || './data/live-edit';
+    const workspacePath = path.join(liveEditDir, siteId);
+    try {
+      await fs.mkdir(path.dirname(workspacePath), { recursive: true });
+      await fs.cp(`${workDir}/output`, workspacePath, { recursive: true, force: true });
+      buildEmitter.log(buildId, 'deploy', 'info', `Live Edit workspace updated at ${workspacePath}`);
+    } catch (copyErr) {
+      buildEmitter.log(buildId, 'deploy', 'warn', `Failed to persist Live Edit workspace (non-fatal): ${(copyErr as Error).message}`);
+    }
+
   } catch (error: any) {
     buildEmitter.log(buildId, 'deploy', 'error', `Build failed: ${error.message}`);
     buildEmitter.emitComplete(buildId, false, error.message);

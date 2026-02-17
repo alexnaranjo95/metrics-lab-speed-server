@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, type Build } from '@/lib/api';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
 import { cn, formatBytes, formatDate } from '@/lib/utils';
-import { Play, ExternalLink, CheckCircle, XCircle, Clock, Loader2, Settings, Eye, Bot, BarChart3, RotateCcw } from 'lucide-react';
+import { Play, ExternalLink, CheckCircle, XCircle, Clock, Loader2, Settings, Eye, Bot, BarChart3, RotateCcw, Pencil } from 'lucide-react';
 
 export function SitePage() {
   const { siteId } = useParams<{ siteId: string }>();
@@ -88,6 +88,15 @@ export function SitePage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {site.edgeUrl && (
+            <Link
+              to={`/sites/${siteId}/live-edit`}
+              className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-cyan-600 text-white hover:bg-cyan-700 transition-colors"
+            >
+              <Pencil className="h-4 w-4" />
+              Live Edit
+            </Link>
+          )}
           <Link
             to={`/sites/${siteId}/performance`}
             className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
