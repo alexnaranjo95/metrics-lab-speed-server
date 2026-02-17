@@ -5,6 +5,9 @@ interface Props {
   defaults: any;
   diff: any;
   onChange: (partial: any) => void;
+  migrationSettings?: any;
+  migrationDiff?: any;
+  onMigrationChange?: (partial: any) => void;
 }
 
 const BREAKPOINT_PRESETS = [
@@ -13,7 +16,7 @@ const BREAKPOINT_PRESETS = [
   { value: 'full', label: 'Full (320-2560)', widths: [320, 480, 640, 768, 1024, 1280, 1440, 1920, 2560] },
 ];
 
-export function ImageTab({ settings, defaults, diff, onChange }: Props) {
+export function ImageTab({ settings, defaults, diff, onChange, migrationSettings, migrationDiff, onMigrationChange }: Props) {
   return (
     <div>
       <SettingCard title="Image Optimization" description="Master toggle for all image optimizations">
@@ -96,6 +99,42 @@ export function ImageTab({ settings, defaults, diff, onChange }: Props) {
           <Toggle checked={settings.optimizeSvg} onChange={(v) => onChange({ optimizeSvg: v })} />
         </SettingField>
       </SettingCard>
+
+      {migrationSettings && onMigrationChange && (
+        <SettingCard title="Cloudflare Images CDN" description="Upload all page images to Cloudflare Images for automatic AVIF/WebP delivery from edge CDN. Zero images served from original host after migration.">
+          <SettingField label="Enable CF Images Migration" description="Migrate all images to Cloudflare Images CDN" isOverridden={migrationDiff?.enabled}>
+            <Toggle checked={migrationSettings.enabled} onChange={(v) => onMigrationChange({ enabled: v })} />
+          </SettingField>
+          {migrationSettings.enabled && (
+            <>
+              <SettingField label="Use Cloudflare Images API" description="Off = local Sharp optimization only" isOverridden={migrationDiff?.useCfImages}>
+                <Toggle checked={migrationSettings.useCfImages} onChange={(v) => onMigrationChange({ useCfImages: v })} />
+              </SettingField>
+              <SettingField label="Skip SVG Files" description="SVGs benefit less from format conversion" isOverridden={migrationDiff?.skipSvg}>
+                <Toggle checked={migrationSettings.skipSvg} onChange={(v) => onMigrationChange({ skipSvg: v })} />
+              </SettingField>
+              <SettingField label="Max File Size (MB)" description="Skip images larger than this" isOverridden={migrationDiff?.maxSizeMb}>
+                <Slider value={migrationSettings.maxSizeMb} min={1} max={50} step={1} onChange={(v) => onMigrationChange({ maxSizeMb: v })} />
+              </SettingField>
+              <SettingField label="Upload Concurrency" description="Parallel uploads per batch" isOverridden={migrationDiff?.concurrency}>
+                <Slider value={migrationSettings.concurrency} min={1} max={50} step={1} onChange={(v) => onMigrationChange({ concurrency: v })} />
+              </SettingField>
+              <SettingField label="Simplify &lt;picture&gt; Elements" description="Replace <picture> with single <img> (CF Images handles format)" isOverridden={migrationDiff?.simplifyPicture}>
+                <Toggle checked={migrationSettings.simplifyPicture} onChange={(v) => onMigrationChange({ simplifyPicture: v })} />
+              </SettingField>
+              <SettingField label="Migrate Open Graph Images" description="Update og:image and twitter:image meta tags" isOverridden={migrationDiff?.migrateOgImages}>
+                <Toggle checked={migrationSettings.migrateOgImages} onChange={(v) => onMigrationChange({ migrateOgImages: v })} />
+              </SettingField>
+              <SettingField label="Migrate Favicons" description="Update favicon and touch icon URLs" isOverridden={migrationDiff?.migrateFavicons}>
+                <Toggle checked={migrationSettings.migrateFavicons} onChange={(v) => onMigrationChange({ migrateFavicons: v })} />
+              </SettingField>
+              <SettingField label="Migrate CSS Backgrounds" description="Update background-image URLs in inline styles and style blocks" isOverridden={migrationDiff?.migrateBackgrounds}>
+                <Toggle checked={migrationSettings.migrateBackgrounds} onChange={(v) => onMigrationChange({ migrateBackgrounds: v })} />
+              </SettingField>
+            </>
+          )}
+        </SettingCard>
+      )}
     </div>
   );
 }

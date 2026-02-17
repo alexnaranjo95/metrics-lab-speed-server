@@ -1,14 +1,32 @@
+import { useEffect, useRef, useState } from 'react';
 import { useScreencastWebSocket } from '@/hooks/useWebSocket';
+import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { Monitor, Wifi, WifiOff } from 'lucide-react';
+import { Monitor, Wifi, WifiOff, RefreshCw, ExternalLink } from 'lucide-react';
 
 interface BuildViewerProps {
   buildId: string;
   enabled?: boolean;
+  siteId?: string;
+  edgeUrl?: string | null;
+  deployKey?: number;
 }
 
-export function BuildViewer({ buildId, enabled = true }: BuildViewerProps) {
+export function BuildViewer({ buildId, enabled = true, siteId, edgeUrl, deployKey = 0 }: BuildViewerProps) {
   const { frameUrl, overlays, phase, isComplete, isConnected } = useScreencastWebSocket({ buildId, enabled });
+  const [screenshotKey, setScreenshotKey] = useState(Date.now());
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const useScreenshotFallback =
+    edgeUrl?.startsWith('http://') && typeof window !== 'undefined' && window.location.protocol === 'https:';
+
+  useEffect(() => {
+    if (!useScreenshotFallback || !siteId) return;
+    const interval = setInterval(() => setScreenshotKey(Date.now()), 5000);
+    return () => clearInterval(interval);
+  }, [useScreenshotFallback, siteId]);
+
+  const showPostBuildPreview = !enabled && edgeUrl && siteId;
 
   return (
     <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
@@ -24,24 +42,50 @@ export function BuildViewer({ buildId, enabled = true }: BuildViewerProps) {
           )}
         </div>
         <div className="flex items-center gap-1.5 text-xs">
-          {isConnected ? (
-            <><Wifi className="h-3 w-3 text-[hsl(var(--success))]" /><span className="text-[hsl(var(--success))]">Connected</span></>
+          {enabled ? (
+            isConnected ? (
+              <><Wifi className="h-3 w-3 text-[hsl(var(--success))]" /><span className="text-[hsl(var(--success))]">Connected</span></>
+            ) : (
+              <><WifiOff className="h-3 w-3 text-[hsl(var(--muted-foreground))]" /><span className="text-[hsl(var(--muted-foreground))]">Disconnected</span></>
+            )
           ) : (
-            <><WifiOff className="h-3 w-3 text-[hsl(var(--muted-foreground))]" /><span className="text-[hsl(var(--muted-foreground))]">Disconnected</span></>
+            edgeUrl && (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    useScreenshotFallback
+                      ? setScreenshotKey(Date.now())
+                      : iframeRef.current?.contentWindow?.location?.reload()
+                  }
+                  className="p-1 rounded text-gray-500 hover:text-gray-700 hover:bg-gray-200"
+                  title="Refresh"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                </button>
+                <a
+                  href={edgeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[hsl(var(--primary))] hover:underline"
+                >
+                  Open <ExternalLink className="h-3 w-3" />
+                </a>
+              </>
+            )
           )}
         </div>
       </div>
 
-      {/* Screencast viewport */}
+      {/* Screencast or post-build preview */}
       <div className="relative bg-black" style={{ aspectRatio: '16/9' }}>
-        {frameUrl ? (
+        {enabled && frameUrl ? (
           <>
             <img
               src={frameUrl}
               alt="Build screencast"
               className="w-full h-full object-contain"
             />
-            {/* SVG overlay */}
             {overlays.length > 0 && (
               <svg
                 className="absolute inset-0 w-full h-full pointer-events-none"
@@ -66,6 +110,23 @@ export function BuildViewer({ buildId, enabled = true }: BuildViewerProps) {
               </svg>
             )}
           </>
+        ) : showPostBuildPreview ? (
+          useScreenshotFallback ? (
+            <img
+              src={api.getPreviewScreenshotUrl(siteId!, screenshotKey)}
+              alt="Site preview"
+              className="w-full h-full object-contain"
+            />
+          ) : (
+            <iframe
+              key={deployKey}
+              ref={iframeRef}
+              src={edgeUrl}
+              title="Deployed site preview"
+              className="w-full h-full border-0"
+              sandbox="allow-scripts allow-same-origin allow-forms"
+            />
+          )
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-[hsl(var(--muted-foreground))]">
             {isComplete ? (

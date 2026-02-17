@@ -14,9 +14,17 @@ export interface SecurityHeadersResult {
  * Generate a Cloudflare Pages _headers file with optimal caching rules
  * and comprehensive security headers for Best Practices score of 100/100.
  */
+export interface EarlyHintAsset {
+  path: string;
+  as: 'style' | 'font' | 'image' | 'script';
+  type?: string;
+  crossorigin?: boolean;
+}
+
 export async function generateHeaders(
   outputDir: string, 
-  settings?: OptimizationSettings
+  settings?: OptimizationSettings,
+  earlyHints?: EarlyHintAsset[]
 ): Promise<SecurityHeadersResult> {
   const cache = settings?.cache.durations;
   const security = settings?.security || settings?.cache?.securityHeaders;
@@ -97,9 +105,46 @@ ${securityLines.join('\n')}
   Content-Type: application/javascript; charset=utf-8
 `;
 
+  // ── Early Hints: Link preload headers for HTTP 103 ──
+  let earlyHintsBlock = '';
+  if (earlyHints && earlyHints.length > 0) {
+    const linkHeaders = earlyHints.map(hint => {
+      const parts = [`<${hint.path}>`, `rel=preload`, `as=${hint.as}`];
+      if (hint.type) parts.push(`type="${hint.type}"`);
+      if (hint.crossorigin) parts.push('crossorigin');
+      return `  Link: ${parts.join('; ')}`;
+    }).join('\n');
+
+    earlyHintsBlock = `\n# Early Hints (HTTP 103) for critical resources\n/\n${linkHeaders}\n/index.html\n${linkHeaders}\n`;
+  }
+
+  // ── Self-hosted asset paths with immutable caching ──
+  const selfHostedBlock = `
+# Self-hosted JS files (content-hashed): cache forever
+/js/*
+  Cache-Control: public, max-age=31536000, immutable
+  Content-Type: application/javascript; charset=utf-8
+
+# Self-hosted CSS files (content-hashed): cache forever
+/css/*
+  Cache-Control: public, max-age=31536000, immutable
+  Content-Type: text/css; charset=utf-8
+
+# Self-hosted fonts: cache forever with CORS
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+  Access-Control-Allow-Origin: *
+
+# Self-hosted images
+/images/*
+  Cache-Control: public, max-age=31536000, immutable
+`;
+
+  const finalContent = headersContent + selfHostedBlock + earlyHintsBlock;
+
   const headersPath = path.join(outputDir, '_headers');
-  await fs.writeFile(headersPath, headersContent, 'utf-8');
-  console.log(`[headers] Generated enhanced _headers file at ${headersPath} (${securityResult.totalSecurityHeaders} security headers)`);
+  await fs.writeFile(headersPath, finalContent, 'utf-8');
+  console.log(`[headers] Generated enhanced _headers file at ${headersPath} (${securityResult.totalSecurityHeaders} security headers${earlyHints?.length ? `, ${earlyHints.length} early hints` : ''})`);
   
   return securityResult;
 }
@@ -190,17 +235,18 @@ function generateSecurityHeaders(
 function generateDefaultCSP(): Record<string, string> {
   return {
     'default-src': '\'self\'',
-    'script-src': '\'self\' \'unsafe-inline\'', // Allow inline scripts for static sites
+    'script-src': '\'self\' \'unsafe-inline\' https://cdn.jsdelivr.net', // Allow inline scripts + hls.js CDN
     'style-src': '\'self\' \'unsafe-inline\'', // Allow inline styles for optimization
-    'img-src': '\'self\' data: https:', // Allow images from self, data URIs, and HTTPS
+    'img-src': '\'self\' data: https: https://imagedelivery.net', // CF Images CDN for all images
     'font-src': '\'self\' data:', // Allow fonts from self and data URIs
-    'connect-src': '\'self\'', // API calls only to same origin
-    'media-src': '\'self\'', // Media files from same origin
-    'object-src': '\'none\'', // No plugins (Flash, etc.)
-    'base-uri': '\'self\'', // Prevent base tag injection
-    'form-action': '\'self\'', // Forms only to same origin
-    'frame-ancestors': '\'none\'', // Prevent embedding (clickjacking)
-    'upgrade-insecure-requests': '', // Force HTTPS
+    'connect-src': '\'self\' https://*.cloudflarestream.com', // API calls + CF Stream HLS chunks
+    'media-src': '\'self\' https://*.cloudflarestream.com blob:', // CF Stream HLS video + MSE blobs
+    'frame-src': '\'self\' https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://www.loom.com https://fast.wistia.net https://iframe.mediadelivery.net https://stream.mux.com https://www.dailymotion.com https://streamable.com https://player.twitch.tv https://clips.twitch.tv https://*.cloudflarestream.com', // Video embed sources
+    'object-src': '\'none\'', // No plugins
+    'base-uri': '\'self\'',
+    'form-action': '\'self\'',
+    'frame-ancestors': '\'none\'',
+    'upgrade-insecure-requests': '',
   };
 }
 

@@ -1,178 +1,53 @@
+/**
+ * Video Facade Pipeline v3
+ *
+ * Detects video embeds across 12 platforms, classifies them as background
+ * or click-to-play, captures Playwright screenshots, and routes to the
+ * appropriate builder:
+ *   - Background videos -> VideoBackgroundBuilder (native <video> + HLS)
+ *   - Click-to-play videos -> VideoFacadeBuilder (poster + iframe on click)
+ *
+ * Also scans <video> elements (not just iframes) for background detection.
+ */
+
 import * as cheerio from 'cheerio';
-import sharp from 'sharp';
-import fs from 'fs/promises';
-import path from 'path';
 import type { OptimizationSettings } from '../shared/settingsSchema.js';
+import { resolveVideoSource, type VideoPlatform } from '../services/video/VideoSourceResolver.js';
+import { classifyVideoType } from '../services/video/VideoTypeClassifier.js';
+import { captureVideoScreenshot } from '../services/video/PlaywrightVideoScreenshotter.js';
+import { uploadThumbnail } from '../services/video/CloudflareImageUploader.js';
+import { buildFacade, buildFacadeActivationScript } from '../services/video/VideoFacadeBuilder.js';
+import { buildBackgroundVideo } from '../services/video/VideoBackgroundBuilder.js';
+import { uploadFromUrl, isStreamAvailable, waitForReady } from '../services/video/CloudflareStreamUploader.js';
+import { downloadVideo, cleanupDownload } from '../services/video/VideoDownloader.js';
+import { uploadToR2, deleteFromR2, isR2Available } from '../services/video/R2StagingUploader.js';
+import { config } from '../config.js';
 
 export interface VideoFacadeResult {
   html: string;
   facadesApplied: number;
+  backgroundVideos: number;
   iframesLazyLoaded?: number;
 }
 
-// Detection patterns for video embeds
-const VIDEO_PATTERNS = {
-  youtube: [
-    /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
-    /youtube-nocookie\.com\/embed\/([a-zA-Z0-9_-]{11})/,
-  ],
-  vimeo: [
-    /player\.vimeo\.com\/video\/(\d+)/,
-  ],
-  wistia: [
-    /fast\.wistia\.net\/embed\/iframe\/([a-zA-Z0-9]+)/,
-  ],
-};
+function isPlatformEnabled(platform: VideoPlatform, platformSettings: Record<string, boolean>): boolean {
+  const mapping: Record<VideoPlatform, string> = {
+    youtube: 'youtube', vimeo: 'vimeo', wistia: 'wistia',
+    loom: 'loom', bunny: 'bunny', mux: 'mux',
+    dailymotion: 'dailymotion', streamable: 'streamable', twitch: 'twitch',
+    directVideo: 'directMp4', wordpress: 'directMp4',
+  };
+  return platformSettings[mapping[platform] ?? platform] !== false;
+}
 
-/** Single script for all video facades — inject once at end of body */
-const FACADE_CLICK_SCRIPT = `<script>
-(function(){document.querySelectorAll('.mls-video-facade').forEach(function(el){
-  el.addEventListener('click',function(){
-    var id=el.dataset.videoId,platform=el.dataset.platform,nocookie=el.dataset.nocookie==='true';
-    var iframe=document.createElement('iframe');
-    iframe.setAttribute('allowfullscreen','');
-    iframe.setAttribute('allow','accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture');
-    iframe.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%;border:0;';
-    if(platform==='youtube'){
-      var host=nocookie?'www.youtube-nocookie.com':'www.youtube.com';
-      iframe.src='https://'+host+'/embed/'+id+'?autoplay=1';
-    }else if(platform==='vimeo'){
-      iframe.src='https://player.vimeo.com/video/'+id+'?autoplay=1';
-    }else if(platform==='wistia'){
-      iframe.src='https://fast.wistia.net/embed/iframe/'+id+'?autoplay=true';
-    }
-    el.innerHTML='';el.style.position='relative';el.appendChild(iframe);
-  },{once:true});
-});})();
-</script>`;
-
-type PosterQuality = 'default' | 'mqdefault' | 'hqdefault' | 'sddefault' | 'maxresdefault';
-
-/**
- * Fetch and optimize a video thumbnail.
- * YouTube: use posterQuality for URL; Vimeo/Wistia: fetch via oembed.
- */
-async function fetchThumbnail(
-  videoId: string,
-  platform: string,
-  posterQuality: PosterQuality,
-  workDir: string
-): Promise<string> {
-  let thumbnailUrl: string | null = null;
-
-  try {
-    if (platform === 'youtube') {
-      thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/${posterQuality}.jpg`;
-      // Try maxresdefault first, fallback to hqdefault if 404
-      if (posterQuality === 'maxresdefault') {
-        const res = await fetch(thumbnailUrl, { signal: AbortSignal.timeout(5000) });
-        if (!res.ok) thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-      }
-    } else if (platform === 'vimeo') {
-      const res = await fetch(`https://vimeo.com/api/oembed.json?url=https://vimeo.com/${videoId}`, {
-        signal: AbortSignal.timeout(10000),
-      });
-      if (res.ok) {
-        const data = await res.json() as { thumbnail_url?: string };
-        thumbnailUrl = data.thumbnail_url ?? null;
-      }
-    } else if (platform === 'wistia') {
-      const res = await fetch(`https://fast.wistia.com/oembed?url=https://home.wistia.com/medias/${videoId}`, {
-        signal: AbortSignal.timeout(10000),
-      });
-      if (res.ok) {
-        const data = await res.json() as { thumbnail_url?: string };
-        thumbnailUrl = data.thumbnail_url ?? null;
-      }
-    }
-
-    if (!thumbnailUrl) return '';
-
-    const response = await fetch(thumbnailUrl, { signal: AbortSignal.timeout(15000) });
-    if (!response.ok) return '';
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-
-    // Optimize with Sharp: resize to 640x360, WebP quality 80
-    const optimized = await sharp(buffer)
-      .resize(640, 360, { fit: 'cover' })
-      .webp({ quality: 80 })
-      .toBuffer();
-
-    const thumbDir = path.join(workDir, 'assets', 'video-thumbnails');
-    await fs.mkdir(thumbDir, { recursive: true });
-    const thumbFilename = `${platform}-${videoId}.webp`;
-    await fs.writeFile(path.join(thumbDir, thumbFilename), optimized);
-    return `/assets/video-thumbnails/${thumbFilename}`;
-  } catch {
-    return '';
-  }
+function isAboveTheFold($: cheerio.CheerioAPI, el: any, index: number): boolean {
+  if (index === 0) return true;
+  return $(el).closest('header, .hero, [class*="hero"], .banner, [class*="banner"]').length > 0;
 }
 
 /**
- * Generate facade HTML for a video embed (no inline script — script injected once per page).
- */
-function generateFacadeHtml(
-  videoId: string,
-  platform: string,
-  thumbnailPath: string,
-  useNocookie: boolean,
-  originalWidth?: string,
-  originalHeight?: string
-): string {
-  const width = originalWidth || '100%';
-  const height = originalHeight || '100%';
-  const nocookieAttr = platform === 'youtube' && useNocookie ? ' data-nocookie="true"' : '';
-  const posterSrc = thumbnailPath || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-
-  return `<div class="mls-video-facade" data-platform="${platform}" data-video-id="${videoId}"${nocookieAttr} style="position:relative;width:${width};max-width:100%;aspect-ratio:16/9;cursor:pointer;overflow:hidden;background:#000;border-radius:8px;">
-  <img src="${posterSrc}" alt="Video thumbnail" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover;">
-  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:68px;height:48px;background:rgba(0,0,0,0.7);border-radius:14px;display:flex;align-items:center;justify-content:center;">
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
-  </div>
-</div>`;
-}
-
-/**
- * Add loading="lazy" to iframes that don't have it.
- */
-function addLazyLoadToIframes($: cheerio.CheerioAPI, enabled: boolean): number {
-  if (!enabled) return 0;
-  let count = 0;
-  $('iframe').each((_, el) => {
-    if (!$(el).attr('loading')) {
-      $(el).attr('loading', 'lazy');
-      count++;
-    }
-  });
-  return count;
-}
-
-/**
- * Add preconnect hints for video CDNs when facades are used.
- */
-function addPreconnectHints($: cheerio.CheerioAPI, preconnect: boolean, useNocookie: boolean, hasFacades: boolean): void {
-  if (!preconnect || !hasFacades) return;
-  const head = $('head').first();
-  if (!head.length) return;
-
-  const hrefs = ['https://i.ytimg.com'];
-  if (useNocookie) {
-    hrefs.push('https://www.youtube-nocookie.com');
-  } else {
-    hrefs.push('https://www.youtube.com');
-  }
-
-  for (const href of hrefs) {
-    if ($(`link[rel="preconnect"][href="${href}"]`).length === 0) {
-      head.append(`<link rel="preconnect" href="${href}" crossorigin>`);
-    }
-  }
-}
-
-/**
- * Detect and replace video embeds with lightweight facades.
- * Wires: posterQuality, useNocookie, preconnect, platforms, lazyLoadIframes.
+ * Detect and replace video embeds with optimized components.
+ * Routes background videos to System A and click-to-play to System B.
  */
 export async function replaceVideoEmbeds(
   html: string,
@@ -181,68 +56,277 @@ export async function replaceVideoEmbeds(
 ): Promise<VideoFacadeResult> {
   const video = settings?.video;
   if (video?.facadesEnabled === false && !video?.lazyLoadIframes) {
-    return { html, facadesApplied: 0, iframesLazyLoaded: 0 };
+    return { html, facadesApplied: 0, backgroundVideos: 0, iframesLazyLoaded: 0 };
   }
 
   const $ = cheerio.load(html);
   let facadesApplied = 0;
-  const platformSettings = video?.platforms ?? { youtube: true, vimeo: true, wistia: true };
-  const posterQuality = (video?.posterQuality ?? 'sddefault') as PosterQuality;
+  let backgroundVideos = 0;
+  const preloadTags: string[] = [];
+  const bgPreloadTags: string[] = [];
+  const platformSettings = (video?.platforms ?? { youtube: true, vimeo: true, wistia: true }) as Record<string, boolean>;
   const useNocookie = video?.useNocookie ?? true;
-  const preconnect = video?.preconnect ?? true;
+  const screenshotTimestamp = (video as any)?.screenshotTimestamp ?? 3;
+  const bgScreenshotTimestamp = (video as any)?.screenshotTimestampBg ?? 2;
+  const useCfImages = (video as any)?.useCfImages ?? true;
+  const useCfStream = (video as any)?.useCfStream ?? true;
+  const aboveTheFoldDetection = (video as any)?.aboveTheFoldDetection ?? true;
 
+  let videoIndex = 0;
+
+  // ── Process <iframe> elements ──
   const iframes = $('iframe').toArray();
-
   for (const iframe of iframes) {
     const src = $(iframe).attr('src') || '';
-    let platform: string | null = null;
-    let videoId: string | null = null;
+    if (!src) continue;
 
-    for (const [p, patterns] of Object.entries(VIDEO_PATTERNS)) {
-      const key = p as keyof typeof platformSettings;
-      if (key in platformSettings && !platformSettings[key]) continue;
-      for (const pattern of patterns) {
-        const match = src.match(pattern);
-        if (match) {
-          platform = p;
-          videoId = match[1];
-          break;
+    const resolved = resolveVideoSource(src);
+    if (!resolved) continue;
+    if (!isPlatformEnabled(resolved.platform, platformSettings)) continue;
+
+    const classification = classifyVideoType($, iframe as any);
+    console.log(
+      `[video-facade] Classified ${resolved.platform}/${resolved.videoId}: ` +
+      `${classification.type} (confidence: ${classification.confidence.toFixed(2)}, ` +
+      `signals: ${classification.signals.join('; ')})`
+    );
+
+    try {
+      const aboveTheFold = aboveTheFoldDetection && isAboveTheFold($, iframe, videoIndex);
+
+      if (classification.type === 'background' && useCfStream && isStreamAvailable()) {
+        // ── System A: Background video ──
+        const result = await processBackgroundVideo($, iframe, resolved, aboveTheFold, bgScreenshotTimestamp, useCfImages, workDir);
+        if (result) {
+          bgPreloadTags.push(result.preloadTag);
+          backgroundVideos++;
+          videoIndex++;
         }
+      } else {
+        // ── System B: Click-to-play facade ──
+        await processClickToPlayVideo($, iframe, resolved, aboveTheFold, screenshotTimestamp, useCfImages, useNocookie, workDir, preloadTags);
+        facadesApplied++;
+        videoIndex++;
       }
-      if (platform) break;
+    } catch (err) {
+      console.error(`[video-facade] Failed ${resolved.platform}/${resolved.videoId}: ${(err as Error).message}`);
+      if (!$(iframe).attr('loading')) $(iframe).attr('loading', 'lazy');
     }
-
-    if (!platform || !videoId) continue;
-
-    const thumbnailPath = await fetchThumbnail(videoId, platform, posterQuality, workDir);
-    const width = $(iframe).attr('width');
-    const height = $(iframe).attr('height');
-    const facadeHtml = generateFacadeHtml(videoId, platform, thumbnailPath, useNocookie, width, height);
-
-    $(iframe).replaceWith(facadeHtml);
-    facadesApplied++;
   }
 
-  // Lazy load remaining iframes (not replaced by facades)
-  const iframesLazyLoaded = addLazyLoadToIframes($, video?.lazyLoadIframes ?? true);
+  // ── Process <video> elements (background video detection) ──
+  const videoElements = $('video').toArray();
+  for (const videoEl of videoElements) {
+    const classification = classifyVideoType($, videoEl as any);
 
-  // Preconnect hints when we have facades
-  addPreconnectHints($, preconnect, useNocookie, facadesApplied > 0);
+    if (classification.type !== 'background') continue;
+    if (!useCfStream || !isStreamAvailable()) continue;
 
-  // Inject single facade script at end of body (only if we added facades)
+    const src = $(videoEl).find('source').first().attr('src') ||
+                $(videoEl).attr('src') || '';
+    if (!src) continue;
+
+    const resolved = resolveVideoSource(src);
+    if (!resolved) continue;
+
+    console.log(
+      `[video-facade] Found background <video>: ${resolved.platform}/${resolved.videoId} ` +
+      `(signals: ${classification.signals.join('; ')})`
+    );
+
+    try {
+      const aboveTheFold = aboveTheFoldDetection && isAboveTheFold($, videoEl, videoIndex);
+      const result = await processBackgroundVideo($, videoEl, resolved, aboveTheFold, bgScreenshotTimestamp, useCfImages, workDir);
+      if (result) {
+        bgPreloadTags.push(result.preloadTag);
+        backgroundVideos++;
+        videoIndex++;
+      }
+    } catch (err) {
+      console.error(`[video-facade] Failed bg video ${resolved.platform}/${resolved.videoId}: ${(err as Error).message}`);
+    }
+  }
+
+  // ── Lazy-load remaining iframes ──
+  let iframesLazyLoaded = 0;
+  if (video?.lazyLoadIframes !== false) {
+    $('iframe').each((_, el) => {
+      if (!$(el).attr('loading')) {
+        $(el).attr('loading', 'lazy');
+        iframesLazyLoaded++;
+      }
+    });
+  }
+
+  // ── Inject preloads: background video first, then click-to-play ──
+  const head = $('head').first();
+  if (head.length) {
+    const allPreloads = [...bgPreloadTags, ...preloadTags];
+    if (allPreloads.length > 0) {
+      head.prepend(allPreloads.join('\n'));
+    }
+  }
+
+  // ── Inject facade activation script ──
   if (facadesApplied > 0) {
     const body = $('body').first();
-    const hasFacadeScript = $('script')
-      .filter((_, el) => (($(el).html() || '').includes('mls-video-facade')))
-      .length > 0;
-    if (body.length && !hasFacadeScript) {
-      body.append(FACADE_CLICK_SCRIPT);
+    const hasScript = $('script').filter((_, el) => (($(el).html() || '').includes('ml-video-facade'))).length > 0;
+    if (body.length && !hasScript) {
+      body.append(buildFacadeActivationScript());
     }
   }
 
   return {
     html: $.html(),
     facadesApplied,
+    backgroundVideos,
     iframesLazyLoaded,
   };
+}
+
+/**
+ * Process a background video: upload to CF Stream, capture screenshot,
+ * build native <video> component with HLS.
+ */
+async function processBackgroundVideo(
+  $: cheerio.CheerioAPI,
+  el: any,
+  resolved: ReturnType<typeof resolveVideoSource> & {},
+  aboveTheFold: boolean,
+  timestampSeconds: number,
+  useCfImages: boolean,
+  workDir: string
+): Promise<{ preloadTag: string } | null> {
+  let streamResult;
+
+  if (resolved.requiresDownload) {
+    // Download -> R2 staging -> CF Stream
+    if (!isR2Available()) {
+      console.warn(`[video-facade] R2 not configured, skipping bg video download for ${resolved.platform}/${resolved.videoId}`);
+      return null;
+    }
+    const download = await downloadVideo(resolved.screenshotUrl, resolved.videoId, resolved.platform);
+    try {
+      const r2Key = `staging/${resolved.platform}-${resolved.videoId}.${download.format}`;
+      const r2 = await uploadToR2(download.filePath, r2Key);
+      streamResult = await uploadFromUrl(r2.presignedUrl, {
+        name: `${resolved.platform}-${resolved.videoId}`,
+        platform: resolved.platform,
+      });
+      // Clean up R2 staging file after Stream ingests it (async, non-blocking)
+      waitForReady(streamResult.uid, 120000).then(() => deleteFromR2(r2Key)).catch(() => {});
+    } finally {
+      await cleanupDownload(download.filePath);
+    }
+  } else {
+    // Direct URL copy to CF Stream
+    streamResult = await uploadFromUrl(resolved.screenshotUrl, {
+      name: `${resolved.platform}-${resolved.videoId}`,
+      platform: resolved.platform,
+    });
+  }
+
+  // Capture Playwright screenshot for placeholder
+  const screenshot = await captureVideoScreenshot({
+    videoUrl: resolved.screenshotUrl,
+    platform: resolved.platform,
+    videoId: resolved.videoId,
+    timestampSeconds,
+  });
+
+  // Upload placeholder to CF Images (both desktop and mobile variants)
+  const imageId = `ml-bg-${resolved.videoId}`;
+  const uploaded = await uploadThumbnail(
+    screenshot.screenshotBuffer,
+    imageId,
+    { sourceUrl: resolved.screenshotUrl, capturedAt: screenshot.capturedAt },
+    workDir
+  );
+
+  // Get container CSS from parent element
+  const $el = $(el);
+  const parent = $el.parent();
+  const containerClasses = parent.attr('class') || $el.attr('class') || '';
+  const containerStyles = parent.attr('style') || '';
+
+  const { backgroundHtml, preloadTag } = buildBackgroundVideo({
+    streamUid: streamResult.uid,
+    hlsUrl: streamResult.hlsUrl,
+    mp4FallbackUrl: streamResult.mp4Url,
+    thumbnailDesktopUrl: uploaded.publicUrl,
+    thumbnailMobileUrl: uploaded.thumbUrl,
+    actualWidth: screenshot.actualWidth,
+    actualHeight: screenshot.actualHeight,
+    originalContainerClasses: containerClasses,
+    originalContainerStyles: containerStyles,
+    mobileBreakpoint: (config as any).BACKGROUND_VIDEO_MOBILE_BREAKPOINT || 768,
+  });
+
+  // Replace the element with the background video component
+  if (parent.children().length === 1) {
+    // Replace entire parent if it only contains the video
+    parent.replaceWith(backgroundHtml);
+  } else {
+    $el.replaceWith(backgroundHtml);
+  }
+
+  console.log(
+    `[video-facade] Background video: ${resolved.platform}/${resolved.videoId} -> ` +
+    `CF Stream ${streamResult.uid} (${streamResult.readyToStream ? 'ready' : 'processing'})`
+  );
+
+  return { preloadTag };
+}
+
+/**
+ * Process a click-to-play video: screenshot + facade.
+ */
+async function processClickToPlayVideo(
+  $: cheerio.CheerioAPI,
+  el: any,
+  resolved: ReturnType<typeof resolveVideoSource> & {},
+  aboveTheFold: boolean,
+  timestampSeconds: number,
+  useCfImages: boolean,
+  useNocookie: boolean,
+  workDir: string,
+  preloadTags: string[]
+): Promise<void> {
+  const screenshot = await captureVideoScreenshot({
+    videoUrl: resolved.screenshotUrl,
+    platform: resolved.platform,
+    videoId: resolved.videoId,
+    timestampSeconds,
+  });
+
+  const imageId = `ml-video-thumb-${resolved.platform}-${resolved.videoId}`;
+  const uploaded = await uploadThumbnail(
+    screenshot.screenshotBuffer,
+    imageId,
+    { sourceUrl: resolved.screenshotUrl, capturedAt: screenshot.capturedAt },
+    workDir
+  );
+
+  const { facadeHtml, preloadTag } = buildFacade({
+    platform: resolved.platform,
+    videoId: resolved.videoId,
+    embedUrl: resolved.embedUrl,
+    thumbnailUrl: uploaded.publicUrl,
+    thumbUrl: uploaded.thumbUrl,
+    actualWidth: screenshot.actualWidth,
+    actualHeight: screenshot.actualHeight,
+    title: resolved.title || `${resolved.platform} video`,
+    aboveTheFold,
+    useNocookie,
+  });
+
+  $(el).replaceWith(facadeHtml);
+  preloadTags.push(preloadTag);
+
+  console.log(
+    `[video-facade] Click-to-play: ${resolved.platform}/${resolved.videoId} ` +
+    `(${screenshot.actualWidth}x${screenshot.actualHeight}, ` +
+    `${screenshot.isFallback ? 'fallback' : 'screenshot'}, ` +
+    `${uploaded.isLocal ? 'local' : 'CF Images'})`
+  );
 }

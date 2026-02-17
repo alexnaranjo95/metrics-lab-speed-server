@@ -75,6 +75,13 @@ const platformsSchema = z.object({
   youtube: z.boolean().default(true),
   vimeo: z.boolean().default(true),
   wistia: z.boolean().default(true),
+  loom: z.boolean().default(true),
+  bunny: z.boolean().default(true),
+  mux: z.boolean().default(true),
+  dailymotion: z.boolean().default(true),
+  streamable: z.boolean().default(true),
+  twitch: z.boolean().default(true),
+  directMp4: z.boolean().default(true),
 });
 
 const videoSettingsSchema = z.object({
@@ -90,7 +97,31 @@ const videoSettingsSchema = z.object({
   iframeLazyMargin: z.number().min(0).max(2000).default(200),
   googleMapsUseFacade: z.boolean().default(true),
   googleMapsStaticPreview: z.boolean().default(true),
-  platforms: platformsSchema.default({ youtube: true, vimeo: true, wistia: true }),
+  screenshotTimestamp: z.number().min(0).max(60).default(3),
+  screenshotTimestampBg: z.number().min(0).max(60).default(2),
+  useCfImages: z.boolean().default(true),
+  useCfStream: z.boolean().default(true),
+  aboveTheFoldDetection: z.boolean().default(true),
+  platforms: platformsSchema.default({
+    youtube: true, vimeo: true, wistia: true,
+    loom: true, bunny: true, mux: true,
+    dailymotion: true, streamable: true, twitch: true,
+    directMp4: true,
+  }),
+});
+
+// ─── Image Migration Settings ─────────────────────────────────────
+
+const imageMigrationSettingsSchema = z.object({
+  enabled: z.boolean().default(true),
+  useCfImages: z.boolean().default(true),
+  skipSvg: z.boolean().default(true),
+  maxSizeMb: z.number().min(1).max(50).default(10),
+  concurrency: z.number().min(1).max(50).default(10),
+  simplifyPicture: z.boolean().default(true),
+  migrateOgImages: z.boolean().default(true),
+  migrateFavicons: z.boolean().default(true),
+  migrateBackgrounds: z.boolean().default(true),
 });
 
 // ─── CSS Settings ─────────────────────────────────────────────────
@@ -169,6 +200,8 @@ const jsSettingsSchema = z.object({
   dropConsole: z.boolean().default(true),
   dropDebugger: z.boolean().default(true),
   terserPasses: z.number().min(1).max(5).default(3),
+  removeThirdPartyScripts: z.boolean().default(true),
+  thirdPartyAction: z.enum(['remove', 'defer', 'keep']).default('remove'),
 });
 
 // ─── HTML Settings ────────────────────────────────────────────────
@@ -227,6 +260,9 @@ const htmlSettingsSchema = z.object({
     dnsPrefetchWpOrg: true, oembedDiscovery: true, prevNextLinks: true,
   }),
   removeAnalytics: z.boolean().default(true),
+  removeElementorDataAttrs: z.boolean().default(true),
+  removeSvgDuplicates: z.boolean().default(true),
+  svgDuplicateThreshold: z.number().min(2).max(10).default(3),
 });
 
 // ─── Font Settings ────────────────────────────────────────────────
@@ -446,7 +482,19 @@ export const settingsSchema = z.object({
     youtubeParams: 'rel=0&modestbranding=1', preconnect: true, useNocookie: true,
     customPlayButton: false, lazyLoadIframes: true, iframeLazyMargin: 200,
     googleMapsUseFacade: true, googleMapsStaticPreview: true,
-    platforms: { youtube: true, vimeo: true, wistia: true },
+    screenshotTimestamp: 3, screenshotTimestampBg: 2,
+    useCfImages: true, useCfStream: true, aboveTheFoldDetection: true,
+    platforms: {
+      youtube: true, vimeo: true, wistia: true,
+      loom: true, bunny: true, mux: true,
+      dailymotion: true, streamable: true, twitch: true,
+      directMp4: true,
+    },
+  }),
+  imageMigration: imageMigrationSettingsSchema.default({
+    enabled: true, useCfImages: true, skipSvg: true, maxSizeMb: 10,
+    concurrency: 10, simplifyPicture: true, migrateOgImages: true,
+    migrateFavicons: true, migrateBackgrounds: true,
   }),
   css: cssSettingsSchema.default({
     enabled: true, purge: true, purgeAggressiveness: 'safe', purgeSafelist: {
@@ -468,6 +516,7 @@ export const settingsSchema = z.object({
     }, removeJquery: false, jqueryCompatibilityCheck: true, customRemovePatterns: [],
     combineScripts: false, minifyEnabled: true, moveToBodyEnd: true,
     dropConsole: true, dropDebugger: true, terserPasses: 3,
+    removeThirdPartyScripts: true, thirdPartyAction: 'remove',
   }),
   html: htmlSettingsSchema.default({
     enabled: true,
@@ -487,6 +536,9 @@ export const settingsSchema = z.object({
       dnsPrefetchWpOrg: true, oembedDiscovery: true, prevNextLinks: true,
     },
     removeAnalytics: true,
+    removeElementorDataAttrs: true,
+    removeSvgDuplicates: true,
+    svgDuplicateThreshold: 3,
   }),
   fonts: fontSettingsSchema.default({
     enabled: true, selfHostGoogleFonts: true, preloadCriticalFonts: true,

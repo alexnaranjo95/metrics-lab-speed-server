@@ -9,11 +9,19 @@ import { optimizeJsFile, addDeferToScripts, moveHeadScriptsToBody, updateJsRefer
 import { optimizeImage, rewriteImageTags, injectImageDimensions, detectLCPImageCandidates } from './optimizeImages.js';
 import { replaceVideoEmbeds } from './videoFacades.js';
 import { replaceWidgetEmbeds } from './widgetFacades.js';
+import { optimizePageAssets } from '../services/PageAssetOptimizer.js';
 import { optimizeFonts } from './optimizeFonts.js';
 import { injectResourceHints } from './resourceHints.js';
 import { generateHeaders } from './headersGenerator.js';
 import { optimizeCLS } from './optimizeCLS.js';
 import { optimizeSEO } from './optimizeSEO.js';
+import { scanScripts, getScriptSummary } from '../services/scripts/ScriptScanner.js';
+import { detectThirdPartyTools } from '../services/scripts/ThirdPartyDetector.js';
+import { injectZarazPlaceholder } from '../services/scripts/ZarazPlaceholderInjector.js';
+import { extractCriticalCss as extractCritical, injectCriticalCss } from '../services/styles/CriticalCssExtractor.js';
+import { deduplicateInlineSvgs } from '../services/html/SvgSpriteOptimizer.js';
+import { injectResourceHints as injectPriorityHints } from '../services/html/ResourceHintInjector.js';
+import * as cheerio from 'cheerio';
 
 export interface OptimizeOptions {
   pages: CrawledPage[];
@@ -264,6 +272,57 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       }
     }
 
+    // 4b4. Script scanning + third-party detection + Zaraz placeholder
+    if (settings.js.removeThirdPartyScripts !== false) try {
+      const $scan = cheerio.load(html);
+      const scriptRecords = scanScripts($scan);
+      if (i === 0) {
+        const summary = getScriptSummary(scriptRecords);
+        emit('html', 'info', `Scripts: ${summary.total} total, ${summary.deadCode} dead, ${summary.thirdParty} third-party`);
+        console.log(`[optimize] Script scan: ${summary.total} total, ${summary.deadCode} dead, ${summary.thirdParty} third-party`);
+      }
+
+      const thirdPartyReport = detectThirdPartyTools(scriptRecords);
+      if (thirdPartyReport.detectedTools.length > 0 && i === 0) {
+        emit('html', 'info', `Third-party: ${thirdPartyReport.detectedTools.map(t => t.name).join(', ')} (~${thirdPartyReport.estimatedPayloadSavedKb}KB)`);
+        console.log(`[optimize] Third-party detected: ${thirdPartyReport.detectedTools.map(t => t.name).join(', ')}`);
+      }
+
+      // Remove or defer third-party scripts based on settings
+      const thirdPartyAction = (settings.js as any).thirdPartyAction ?? 'remove';
+      for (const record of scriptRecords) {
+        if (record.isThirdParty && thirdPartyAction === 'remove') {
+          if (record.src) {
+            $scan(`script[src="${record.src}"]`).remove();
+          }
+        } else if (record.isThirdParty && thirdPartyAction === 'defer') {
+          if (record.src) {
+            $scan(`script[src="${record.src}"]`).attr('defer', '');
+          }
+        }
+        if (record.isDeadCode && record.suggestedLoading === 'remove') {
+          if (record.src) {
+            $scan(`script[src*="${record.src.split('/').pop()}"]`).remove();
+          } else if (record.content) {
+            $scan('script:not([src])').each((_, el) => {
+              const c = $scan(el).html() || '';
+              if (c.trim() === record.content?.trim()) $scan(el).remove();
+            });
+          }
+        }
+      }
+
+      // Inject Zaraz placeholder
+      const zarazResult = injectZarazPlaceholder($scan, thirdPartyReport);
+      if (zarazResult.injected && i === 0) {
+        emit('html', 'info', `Zaraz placeholder injected for ${zarazResult.toolCount} tools`);
+      }
+
+      html = $scan.html();
+    } catch (err) {
+      console.error(`[optimize] Script scanning failed for ${page.path}:`, (err as Error).message);
+    }
+
     // 4c. Video facade replacement
     try {
       if (i === 0) {
@@ -359,6 +418,84 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       html = injectResourceHints(html);
     } catch (err) {
       console.error(`[optimize] Resource hints injection failed for ${page.path}:`, (err as Error).message);
+    }
+
+    // 4k2. CF Images migration (upload all images to Cloudflare Images CDN)
+    if ((settings as any).imageMigration?.enabled) {
+      try {
+        if (i === 0) {
+          const imgMig = (settings as any).imageMigration;
+          emit('images', 'info', `CF Images migration: enabled=${imgMig.enabled}, cfImages=${imgMig.useCfImages}`);
+          console.log(`[optimize] CF Images migration enabled for ${page.path}`);
+        }
+        const assetResult = await optimizePageAssets({
+          html,
+          siteId: siteUrl,
+          siteUrl,
+          workDir,
+          settings,
+          onProgress: (event) => {
+            if (buildId) {
+              emit('images', 'info', event.message);
+            }
+          },
+        });
+        html = assetResult.optimizedHtml;
+        if (i === 0) {
+          const r = assetResult.report;
+          emit('images', 'info', `CF Images: ${r.imagesMigrated} migrated, ${r.imagesFailed} failed, ${r.replacedCount} URLs replaced, ${r.dimensionsAdded} dimensions added`);
+          console.log(`[optimize] CF Images migration: ${r.imagesMigrated} migrated, ${r.imagesFailed} failed`);
+        }
+      } catch (err) {
+        console.error(`[optimize] CF Images migration failed for ${page.path}:`, (err as Error).message);
+      }
+    }
+
+    // 4l-pre1. Critical CSS extraction (Playwright coverage)
+    try {
+      const critResult = await extractCritical(html, (msg) => {
+        if (i === 0 && buildId) emit('css', 'info', msg);
+      });
+      if (critResult.criticalCss) {
+        const $crit = cheerio.load(html);
+        const cssFilePaths = $crit('link[rel="stylesheet"]').toArray()
+          .map(el => $crit(el).attr('href') || '')
+          .filter(Boolean);
+        injectCriticalCss($crit, critResult.criticalCss, cssFilePaths);
+        html = $crit.html();
+        if (i === 0) {
+          emit('css', 'info', `Critical CSS: ${critResult.criticalSizeKb.toFixed(1)}KB inlined`);
+          console.log(`[optimize] Critical CSS: ${critResult.criticalSizeKb.toFixed(1)}KB`);
+        }
+      }
+    } catch (err) {
+      console.error(`[optimize] Critical CSS extraction failed for ${page.path}:`, (err as Error).message);
+    }
+
+    // 4l-pre2. SVG sprite deduplication
+    if (settings.html.removeSvgDuplicates !== false) try {
+      const $svg = cheerio.load(html);
+      const svgResult = deduplicateInlineSvgs($svg);
+      if (svgResult.spriteCreated) {
+        html = $svg.html();
+        if (i === 0) {
+          emit('html', 'info', `SVG sprite: ${svgResult.symbolCount} symbols, ${svgResult.replacements} replacements, ~${(svgResult.savedBytes / 1024).toFixed(1)}KB saved`);
+        }
+      }
+    } catch (err) {
+      console.error(`[optimize] SVG sprite optimization failed for ${page.path}:`, (err as Error).message);
+    }
+
+    // 4l-pre3. Priority-ordered resource hint injection
+    try {
+      const $hints = cheerio.load(html);
+      injectPriorityHints($hints, {
+        hasBackgroundVideo: html.includes('ml-bg-wrapper'),
+        hasCfStreamVideos: html.includes('cloudflarestream.com'),
+      });
+      html = $hints.html();
+    } catch (err) {
+      console.error(`[optimize] Priority resource hints failed for ${page.path}:`, (err as Error).message);
     }
 
     // 4l. Final HTML minification (html-minifier-terser) — runs LAST, only when html.enabled

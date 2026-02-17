@@ -99,7 +99,7 @@ export function SettingsPanel({ siteId }: SettingsPanelProps) {
   const dirtyTabs = useMemo(() => {
     const tabs = new Set<string>();
     for (const key of Object.keys(draft)) {
-      if (key === 'images') tabs.add('images');
+      if (key === 'images' || key === 'imageMigration') tabs.add('images');
       else if (key === 'video') tabs.add('media');
       else if (key === 'css') tabs.add('css');
       else if (key === 'js') tabs.add('js');
@@ -181,7 +181,7 @@ export function SettingsPanel({ siteId }: SettingsPanelProps) {
       <div className="p-5 pb-20">
         {settings && (
           <>
-            {activeTab === 'images' && <ImageTab settings={settings.images} defaults={defaults?.images} diff={diff.images} onChange={(v) => updateField(['images'], v)} />}
+            {activeTab === 'images' && <ImageTab settings={settings.images} defaults={defaults?.images} diff={diff.images} onChange={(v) => updateField(['images'], v)} migrationSettings={settings.imageMigration} migrationDiff={diff.imageMigration} onMigrationChange={(v) => updateField(['imageMigration'], v)} />}
             {activeTab === 'media' && <MediaTab settings={settings.video} defaults={defaults?.video} diff={diff.video} onChange={(v) => updateField(['video'], v)} />}
             {activeTab === 'css' && <CssTab settings={settings.css} defaults={defaults?.css} diff={diff.css} onChange={(v) => updateField(['css'], v)} />}
             {activeTab === 'js' && <JsTab settings={settings.js} defaults={defaults?.js} diff={diff.js} onChange={(v) => updateField(['js'], v)} />}

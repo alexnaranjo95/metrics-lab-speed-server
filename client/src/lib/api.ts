@@ -191,11 +191,26 @@ export const api = {
     fetchJson<{ hasWorkspace: boolean; edgeUrl: string | null; canEdit: boolean }>(
       `/sites/${siteId}/live-edit/status`
     ),
+  getPreviewScreenshotUrl: (siteId: string, cacheBust?: number) => {
+    const token = localStorage.getItem('apiKey') || '';
+    const t = cacheBust ?? Date.now();
+    const params = new URLSearchParams({ t: String(t) });
+    if (token) params.set('token', token);
+    return `${API_BASE}/sites/${siteId}/preview-screenshot?${params}`;
+  },
   liveEditChat: (siteId: string, message: string) =>
-    fetchJson<{ applied: boolean; deployed?: boolean }>(`/sites/${siteId}/live-edit/chat`, {
+    fetchJson<{ mode: string; planId?: string }>(`/sites/${siteId}/live-edit/chat`, {
       method: 'POST',
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, mode: 'plan' }),
     }),
+  liveEditExecute: (siteId: string, planId: string) =>
+    fetchJson<{ applied: boolean; deployed: boolean; planId: string }>(
+      `/sites/${siteId}/live-edit/chat`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ mode: 'execute', planId }),
+      }
+    ),
   liveEditAudit: (siteId: string, type: 'speed' | 'bugs' | 'visual') =>
     fetchJson<any>(`/sites/${siteId}/live-edit/audit`, {
       method: 'POST',

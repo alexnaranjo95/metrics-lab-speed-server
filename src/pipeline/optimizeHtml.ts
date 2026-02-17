@@ -46,6 +46,12 @@ export async function optimizeHtml(html: string, settings?: OptimizationSettings
   removePluginBloat($);
   if (settings?.html.removeAnalytics !== false) removeAnalytics($, settings);
 
+  if (settings?.html.removeElementorDataAttrs !== false) {
+    removeElementorDataAttributes($);
+  }
+  removeGutenbergComments($);
+  removeAosDataAttributes($);
+
   return $.html();
 }
 
@@ -153,12 +159,55 @@ function removeWordPressDuotoneFilters($: cheerio.CheerioAPI) {
 }
 
 /**
+ * Remove Elementor data-* attributes that add ~50KB+ of dead weight.
+ */
+function removeElementorDataAttributes($: cheerio.CheerioAPI) {
+  const ELEMENTOR_ATTRS = [
+    'data-elementor-id',
+    'data-elementor-type',
+    'data-elementor-settings',
+    'data-elementor-model-cid',
+    'data-elementor-column-size',
+    'data-elementor-column-gap',
+    'data-elementor-post-type',
+  ];
+
+  for (const attr of ELEMENTOR_ATTRS) {
+    $(`[${attr}]`).removeAttr(attr);
+  }
+}
+
+/**
  * Remove Gutenberg block comments: <!-- wp:heading --> ... <!-- /wp:heading -->
+ * Also removes Elementor HTML comments.
  */
 function removeGutenbergComments($: cheerio.CheerioAPI) {
-  // Cheerio doesn't directly expose comments easily, so we'll handle
-  // this in the final minification step (html-minifier-terser removes all comments).
-  // But we also do a regex pass for safety.
+  const html = $.html();
+  const cleaned = html
+    .replace(/<!--\s*\/?wp:[a-z][a-z0-9/-]*(?:\s+\{[^}]*\})?\s*-->/gi, '')
+    .replace(/<!--\s*Elementor[^-]*-->/gi, '')
+    .replace(/<!--\s*\/Elementor[^-]*-->/gi, '');
+
+  if (cleaned !== html) {
+    const $new = cheerio.load(cleaned);
+    $('html').replaceWith($new('html'));
+  }
+}
+
+/**
+ * Remove AOS (Animate on Scroll) data attributes when AOS.js has been removed.
+ */
+function removeAosDataAttributes($: cheerio.CheerioAPI) {
+  // Only remove if AOS.js is not present in the page
+  const hasAos = $('script[src*="aos"]').length > 0 ||
+    $('script').filter((_, el) => ($(el).html() || '').includes('AOS.init')).length > 0;
+
+  if (hasAos) return;
+
+  const AOS_ATTRS = ['data-aos', 'data-aos-delay', 'data-aos-duration', 'data-aos-easing', 'data-aos-once', 'data-aos-offset'];
+  for (const attr of AOS_ATTRS) {
+    $(`[${attr}]`).removeAttr(attr);
+  }
 }
 
 /**

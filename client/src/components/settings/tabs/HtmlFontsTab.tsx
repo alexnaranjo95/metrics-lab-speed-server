@@ -94,6 +94,33 @@ export function HtmlFontsTab({ settings, defaults, diff, onChange }: Props) {
         </SettingField>
       </SettingCard>
 
+      <SettingCard title="Elementor / Page Builder Cleanup" description="Remove data attributes and comments injected by WordPress page builders that serve no purpose in static output.">
+        <SettingField label="Remove Elementor Data Attributes" description="Strips data-elementor-id, data-elementor-type, data-elementor-settings (~50KB saved)" isOverridden={diff?.html?.removeElementorDataAttrs}>
+          <Toggle
+            checked={settings.html.removeElementorDataAttrs}
+            onChange={(v) => onChange('html', { removeElementorDataAttrs: v })}
+          />
+        </SettingField>
+      </SettingCard>
+
+      <SettingCard title="SVG Optimization" description="Deduplicate repeated inline SVGs (social icons, nav icons, star ratings) into a shared sprite. Reduces HTML size.">
+        <SettingField label="Deduplicate Inline SVGs" description="Replace identical SVGs with <use> references to a shared sprite" isOverridden={diff?.html?.removeSvgDuplicates}>
+          <Toggle
+            checked={settings.html.removeSvgDuplicates}
+            onChange={(v) => onChange('html', { removeSvgDuplicates: v })}
+          />
+        </SettingField>
+        {settings.html.removeSvgDuplicates && (
+          <SettingField label="Minimum Occurrences" description="Only deduplicate SVGs appearing this many times or more" isOverridden={diff?.html?.svgDuplicateThreshold}>
+            <Slider
+              value={settings.html.svgDuplicateThreshold ?? 3}
+              min={2} max={10}
+              onChange={(v) => onChange('html', { svgDuplicateThreshold: v })}
+            />
+          </SettingField>
+        )}
+      </SettingCard>
+
       <SettingCard title="Font Optimization" description="Master toggle for font optimizations">
         <SettingField label="Enable Font Optimization" isOverridden={diff?.fonts?.enabled}>
           <Toggle checked={settings.fonts.enabled} onChange={(v) => onChange('fonts', { enabled: v })} />

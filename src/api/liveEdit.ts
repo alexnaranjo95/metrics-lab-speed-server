@@ -1,15 +1,18 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { eq } from 'drizzle-orm';
+import { chromium } from 'playwright';
 import { db } from '../db/index.js';
 import { sites } from '../db/schema.js';
 import { config } from '../config.js';
 import { requireMasterKey } from '../middleware/auth.js';
 import { hasWorkspace, getWorkspacePath, ensureWorkspace } from '../liveEdit/workspace.js';
 import { applyEdits, getFileTree, readFileContent } from '../liveEdit/editor.js';
-import { chatWithEdits, isLiveEditClaudeAvailable } from '../liveEdit/claudeLiveEdit.js';
+import { chatWithEdits, chatWithPlan, isLiveEditClaudeAvailable, type PlanOutput } from '../liveEdit/claudeLiveEdit.js';
 import { runSpeedAudit, scanForBugs, runVisualDiff } from '../liveEdit/audits.js';
 import { deployToCloudflare } from '../pipeline/deploy.js';
 import { liveEditEmitter } from '../events/liveEditEmitter.js';
+
+const planStore = new Map<string, PlanOutput>();
 
 const LIVE_EDIT_SYSTEM_PROMPT = `You are a code editor for a static website. The user will describe bugs, design changes, or performance issues.
 You have access to the site's HTML, CSS, and JS source files. Respond with precise file edits.
@@ -60,6 +63,42 @@ export const liveEditRoutes: FastifyPluginAsync = async (app) => {
     }
   );
 
+  // ─── GET /sites/:siteId/preview-screenshot ──
+  app.get<{ Params: { siteId: string }; Querystring: { token?: string; t?: string } }>(
+    '/sites/:siteId/preview-screenshot',
+    async (req, reply) => {
+      if (!(await authOrToken(req, reply))) return;
+      const { siteId } = req.params;
+
+      const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
+      if (!site?.edgeUrl) return reply.code(404).send({ error: 'Site has no edge URL' });
+
+      let browser;
+      try {
+        browser = await chromium.launch({
+          headless: true,
+          args: ['--no-sandbox', '--disable-setuid-sandbox', '--ignore-certificate-errors', '--allow-insecure-localhost'],
+        });
+        const context = await browser.newContext({
+          viewport: { width: 1280, height: 720 },
+          ignoreHTTPSErrors: true,
+        });
+        const page = await context.newPage();
+        await page.goto(site.edgeUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        const buffer = await page.screenshot({ type: 'png' });
+        await browser.close();
+
+        return reply
+          .header('Content-Type', 'image/png')
+          .header('Cache-Control', 'no-store, no-cache')
+          .send(buffer);
+      } catch (err) {
+        if (browser) await browser.close().catch(() => {});
+        return reply.code(500).send({ error: (err as Error).message });
+      }
+    }
+  );
+
   // ─── GET /sites/:siteId/live-edit/stream (SSE) ──
   app.get<{ Params: { siteId: string }; Querystring: { token?: string } }>(
     '/sites/:siteId/live-edit/stream',
@@ -74,25 +113,31 @@ export const liveEditRoutes: FastifyPluginAsync = async (app) => {
         'X-Accel-Buffering': 'no',
       });
 
-      const onThinking = (msg: string) => {
-        reply.raw.write(`event: thinking\ndata: ${JSON.stringify({ message: msg })}\n\n`);
-      };
-      const onPatch = (path: string) => {
-        reply.raw.write(`event: patch\ndata: ${JSON.stringify({ path })}\n\n`);
-      };
-      const onDeploy = (msg: string) => {
-        reply.raw.write(`event: deploy\ndata: ${JSON.stringify({ message: msg })}\n\n`);
-      };
-      const onError = (msg: string) => {
-        reply.raw.write(`event: error\ndata: ${JSON.stringify({ message: msg })}\n\n`);
-      };
-      const onDone = () => {
-        reply.raw.write(`event: done\ndata: {}\n\n`);
+      const writeEvent = (event: string, data: object) => {
+        reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       };
 
+      const onThinking = (msg: string) => writeEvent('thinking', { message: msg });
+      const onMessage = (data: { role: string; content: string; streaming?: boolean }) => writeEvent('message', data);
+      const onPlan = (data: object) => writeEvent('plan', data);
+      const onStepStart = (data: { step: string; description: string }) => writeEvent('step_start', data);
+      const onStepComplete = (data: { step: string; result: string }) => writeEvent('step_complete', data);
+      const onPatch = (path: string) => writeEvent('patch', { path });
+      const onDeploy = (msg: string) => writeEvent('deploy', { message: msg });
+      const onVerificationStart = () => writeEvent('verification_start', {});
+      const onVerificationResult = (data: object) => writeEvent('verification_result', data);
+      const onError = (msg: string) => writeEvent('error', { message: msg });
+      const onDone = () => writeEvent('done', {});
+
       liveEditEmitter.on(`live-edit:${siteId}:thinking`, onThinking);
+      liveEditEmitter.on(`live-edit:${siteId}:message`, onMessage);
+      liveEditEmitter.on(`live-edit:${siteId}:plan`, onPlan);
+      liveEditEmitter.on(`live-edit:${siteId}:step_start`, onStepStart);
+      liveEditEmitter.on(`live-edit:${siteId}:step_complete`, onStepComplete);
       liveEditEmitter.on(`live-edit:${siteId}:patch`, onPatch);
       liveEditEmitter.on(`live-edit:${siteId}:deploy`, onDeploy);
+      liveEditEmitter.on(`live-edit:${siteId}:verification_start`, onVerificationStart);
+      liveEditEmitter.on(`live-edit:${siteId}:verification_result`, onVerificationResult);
       liveEditEmitter.on(`live-edit:${siteId}:error`, onError);
       liveEditEmitter.on(`live-edit:${siteId}:done`, onDone);
 
@@ -100,8 +145,14 @@ export const liveEditRoutes: FastifyPluginAsync = async (app) => {
       const cleanup = () => {
         clearInterval(keepAlive);
         liveEditEmitter.off(`live-edit:${siteId}:thinking`, onThinking);
+        liveEditEmitter.off(`live-edit:${siteId}:message`, onMessage);
+        liveEditEmitter.off(`live-edit:${siteId}:plan`, onPlan);
+        liveEditEmitter.off(`live-edit:${siteId}:step_start`, onStepStart);
+        liveEditEmitter.off(`live-edit:${siteId}:step_complete`, onStepComplete);
         liveEditEmitter.off(`live-edit:${siteId}:patch`, onPatch);
         liveEditEmitter.off(`live-edit:${siteId}:deploy`, onDeploy);
+        liveEditEmitter.off(`live-edit:${siteId}:verification_start`, onVerificationStart);
+        liveEditEmitter.off(`live-edit:${siteId}:verification_result`, onVerificationResult);
         liveEditEmitter.off(`live-edit:${siteId}:error`, onError);
         liveEditEmitter.off(`live-edit:${siteId}:done`, onDone);
       };
@@ -110,13 +161,13 @@ export const liveEditRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // ─── POST /sites/:siteId/live-edit/chat ──
-  app.post<{ Params: { siteId: string }; Body: { message: string } }>(
+  app.post<{ Params: { siteId: string }; Body: { message?: string; mode?: 'plan' | 'execute'; planId?: string } }>(
     '/sites/:siteId/live-edit/chat',
     { preHandler: [requireMasterKey] },
     async (req, reply) => {
       const { siteId } = req.params;
-      const { message } = (req.body as { message?: string }) || {};
-      if (!message?.trim()) return reply.code(400).send({ error: 'message is required' });
+      const body = req.body as { message?: string; mode?: 'plan' | 'execute'; planId?: string };
+      const { message, mode = 'plan', planId } = body;
 
       if (!isLiveEditClaudeAvailable()) {
         return reply.code(400).send({ error: 'ANTHROPIC_API_KEY not configured' });
@@ -130,6 +181,58 @@ export const liveEditRoutes: FastifyPluginAsync = async (app) => {
       const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
       if (!site?.edgeUrl) return reply.code(400).send({ error: 'Site has no edge URL' });
 
+      if (mode === 'execute') {
+        const stored = planStore.get(siteId);
+        if (!stored) return reply.code(400).send({ error: 'No plan to execute. Create a plan first.' });
+        if (planId && stored.planId !== planId) {
+          return reply.code(400).send({ error: 'Plan no longer valid. Create a new plan.' });
+        }
+
+        const { edits } = stored;
+        let applied = false;
+        let deployed = false;
+
+        try {
+          if (edits.length > 0) {
+            liveEditEmitter.emitStepStart(siteId, 'apply', `Applying ${edits.length} edit(s)...`);
+            const { applied: editCount, errors } = await applyEdits(siteId, edits, (p) =>
+              liveEditEmitter.emitPatch(siteId, p)
+            );
+            liveEditEmitter.emitStepComplete(siteId, 'apply', errors.length ? `Applied ${editCount}, ${errors.length} error(s)` : `Applied ${editCount} edit(s)`);
+            if (errors.length) liveEditEmitter.emitError(siteId, errors.join('; '));
+
+            liveEditEmitter.emitStepStart(siteId, 'deploy', 'Deploying to Cloudflare Pages...');
+            const projectName = site.cloudflareProjectName ?? `mls-${siteId}`;
+            const deployResult = await deployToCloudflare({
+              projectName,
+              outputDir: workspacePath,
+              siteUrl: site.siteUrl,
+            });
+            await db.update(sites).set({ edgeUrl: deployResult.url, updatedAt: new Date() }).where(eq(sites.id, siteId));
+            liveEditEmitter.emitStepComplete(siteId, 'deploy', `Live at ${deployResult.url}`);
+            liveEditEmitter.emitDeploy(siteId, 'Deployed to Cloudflare Pages');
+            applied = true;
+            deployed = true;
+          }
+
+          const verifiedUrl = deployed ? (await db.query.sites.findFirst({ where: eq(sites.id, siteId) }))?.edgeUrl : site.edgeUrl;
+          if (verifiedUrl) {
+            liveEditEmitter.emitVerificationStart(siteId);
+            const { runVerificationSuite } = await import('../liveEdit/verification.js');
+            const verification = await runVerificationSuite(verifiedUrl, site.siteUrl, (msg) =>
+              liveEditEmitter.emitThinking(siteId, msg)
+            );
+            liveEditEmitter.emitVerificationResult(siteId, verification);
+          }
+        } catch (err) {
+          liveEditEmitter.emitError(siteId, (err as Error).message);
+        }
+        liveEditEmitter.emitDone(siteId);
+        return reply.send({ applied, deployed, planId: stored.planId });
+      }
+
+      if (!message?.trim()) return reply.code(400).send({ error: 'message is required' });
+
       const files = await getFileTree(siteId);
       const htmlFiles = files.filter(f => f.endsWith('.html')).slice(0, 5);
       let context = `Files: ${files.join(', ')}\n\n`;
@@ -140,42 +243,29 @@ export const liveEditRoutes: FastifyPluginAsync = async (app) => {
 
       const userContent = `Context:\n${context}\n\nUser request: ${message}`;
 
-      let applied = false;
-      let deployed = false;
       try {
-        liveEditEmitter.emitThinking(siteId, 'Analyzing request...');
-        const { edits } = await chatWithEdits(
-          LIVE_EDIT_SYSTEM_PROMPT,
+        liveEditEmitter.emitThinking(siteId, 'Analyzing request and creating plan...');
+        const { text, plan } = await chatWithPlan(
           [{ role: 'user', content: userContent }],
           (chunk) => liveEditEmitter.emitThinking(siteId, chunk)
         );
 
-        if (edits && edits.length > 0) {
-          liveEditEmitter.emitThinking(siteId, `Applying ${edits.length} edit(s)...`);
-          const { applied: editCount, errors } = await applyEdits(siteId, edits, (p) =>
-            liveEditEmitter.emitPatch(siteId, p)
-          );
-          if (errors.length) {
-            liveEditEmitter.emitError(siteId, errors.join('; '));
-          }
-          liveEditEmitter.emitThinking(siteId, `Applied ${editCount} edit(s). Deploying...`);
-          const projectName = site.cloudflareProjectName ?? `mls-${siteId}`;
-          const deployResult = await deployToCloudflare({
-            projectName,
-            outputDir: workspacePath,
-            siteUrl: site.siteUrl,
+        if (plan) {
+          planStore.set(siteId, plan);
+          liveEditEmitter.emitPlan(siteId, {
+            issues: plan.issues,
+            improvements: plan.improvements,
+            rationale: plan.rationale,
+            edits: plan.edits,
+            planId: plan.planId,
           });
-          liveEditEmitter.emitDeploy(siteId, 'Deployed to Cloudflare Pages');
-          await db.update(sites).set({ edgeUrl: deployResult.url, updatedAt: new Date() }).where(eq(sites.id, siteId));
-          applied = true;
-          deployed = true;
         }
       } catch (err) {
         liveEditEmitter.emitError(siteId, (err as Error).message);
       }
       liveEditEmitter.emitDone(siteId);
 
-      return reply.send({ applied, deployed });
+      return reply.send({ mode: 'plan', planId: planStore.get(siteId)?.planId });
     }
   );
 

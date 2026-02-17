@@ -270,6 +270,8 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
       '--disable-gpu',
       '--disable-web-security',
       '--single-process',
+      '--ignore-certificate-errors',
+      '--allow-insecure-localhost',
     ],
   });
   console.log(`[crawl] Chromium launched successfully`);

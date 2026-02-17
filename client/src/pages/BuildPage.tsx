@@ -1,11 +1,23 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { BuildViewer } from '@/components/build-viewer/BuildViewer';
 import { BuildLogs } from '@/components/build-logs/BuildLogs';
+import { OptimizationChat } from '@/components/optimization-chat/OptimizationChat';
 import { cn, formatBytes, formatDate } from '@/lib/utils';
-import { ArrowLeft, CheckCircle, XCircle, Loader2, Clock, BarChart3 } from 'lucide-react';
+import {
+  ArrowLeft,
+  CheckCircle,
+  XCircle,
+  Loader2,
+  Clock,
+  BarChart3,
+  Gauge,
+  Bug,
+  FileDiff,
+  RefreshCw,
+} from 'lucide-react';
 
 const PHASES = ['crawl', 'images', 'css', 'js', 'html', 'fonts', 'deploy'];
 
@@ -20,8 +32,11 @@ const STATUS_MAP: Record<string, string> = {
 
 export function BuildPage() {
   const { siteId, buildId } = useParams<{ siteId: string; buildId: string }>();
-
+  const queryClient = useQueryClient();
   const [pollEnabled, setPollEnabled] = useState(true);
+  const [deployKey, setDeployKey] = useState(0);
+
+  const hasKey = !!localStorage.getItem('apiKey');
 
   const { data: build, isLoading } = useQuery({
     queryKey: ['build', siteId, buildId],
@@ -32,9 +47,44 @@ export function BuildPage() {
       }
       return data;
     },
-    enabled: !!siteId && !!buildId && !!localStorage.getItem('apiKey'),
+    enabled: !!siteId && !!buildId && hasKey,
     refetchInterval: pollEnabled ? 3000 : false,
   });
+
+  const { data: liveEditStatus } = useQuery({
+    queryKey: ['live-edit-status', siteId],
+    queryFn: () => api.getLiveEditStatus(siteId!),
+    enabled: !!siteId && hasKey,
+  });
+
+  const auditMutation = useMutation({
+    mutationFn: (type: 'speed' | 'bugs' | 'visual') => api.liveEditAudit(siteId!, type),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['live-edit-status', siteId] });
+    },
+    onError: (err: Error) => alert(err.message),
+  });
+
+  const deployMutation = useMutation({
+    mutationFn: () => api.liveEditDeploy(siteId!),
+    onSuccess: () => {
+      setDeployKey((k) => k + 1);
+      queryClient.invalidateQueries({ queryKey: ['live-edit-status', siteId] });
+      queryClient.invalidateQueries({ queryKey: ['site-status', siteId] });
+      queryClient.invalidateQueries({ queryKey: ['build', siteId, buildId] });
+    },
+    onError: (err: Error) => alert(err.message),
+  });
+
+  const handleDeploySuccess = () => {
+    setDeployKey((k) => k + 1);
+    queryClient.invalidateQueries({ queryKey: ['live-edit-status', siteId] });
+    queryClient.invalidateQueries({ queryKey: ['site-status', siteId] });
+    queryClient.invalidateQueries({ queryKey: ['build', siteId, buildId] });
+  };
+
+  const isPending = auditMutation.isPending || deployMutation.isPending;
+  const edgeUrl = liveEditStatus?.edgeUrl ?? null;
 
   if (!siteId || !buildId) return <div>Missing parameters</div>;
   if (isLoading) return <div className="animate-pulse p-8 text-center text-[hsl(var(--muted-foreground))]">Loading build...</div>;
@@ -112,7 +162,13 @@ export function BuildPage() {
 
       {/* Build viewer + logs */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <BuildViewer buildId={buildId} enabled={isActive} />
+        <BuildViewer
+          buildId={buildId}
+          enabled={isActive}
+          siteId={siteId}
+          edgeUrl={edgeUrl}
+          deployKey={deployKey}
+        />
         <BuildLogs buildId={buildId} enabled={true} />
       </div>
 
@@ -183,6 +239,77 @@ export function BuildPage() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Claude-style optimization chat */}
+      {liveEditStatus?.hasWorkspace && siteId && (
+        <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
+          <div className="flex items-center justify-end px-4 py-2 border-b border-[hsl(var(--border))]">
+            <Link
+              to={`/sites/${siteId}/live-edit`}
+              className="text-xs text-[hsl(var(--primary))] hover:underline"
+            >
+              Open Live Edit
+            </Link>
+          </div>
+          <OptimizationChat
+            siteId={siteId}
+            deployKey={deployKey}
+            onDeploy={handleDeploySuccess}
+            quickActions={
+              <>
+                <button
+                  type="button"
+                  onClick={() => auditMutation.mutate('speed')}
+                  disabled={isPending}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium',
+                    isPending ? 'opacity-50' : 'bg-amber-600/20 text-amber-700 dark:text-amber-400 hover:bg-amber-600/30'
+                  )}
+                >
+                  {auditMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Gauge className="h-3.5 w-3.5" />}
+                  Speed Audit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => auditMutation.mutate('bugs')}
+                  disabled={isPending}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium',
+                    isPending ? 'opacity-50' : 'bg-rose-600/20 text-rose-700 dark:text-rose-400 hover:bg-rose-600/30'
+                  )}
+                >
+                  {auditMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bug className="h-3.5 w-3.5" />}
+                  Scan Bugs
+                </button>
+                <button
+                  type="button"
+                  onClick={() => auditMutation.mutate('visual')}
+                  disabled={isPending}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium',
+                    isPending ? 'opacity-50' : 'bg-violet-600/20 text-violet-700 dark:text-violet-400 hover:bg-violet-600/30'
+                  )}
+                >
+                  {auditMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDiff className="h-3.5 w-3.5" />}
+                  Visual Diff
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deployMutation.mutate()}
+                  disabled={isPending}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium',
+                    isPending ? 'opacity-50' : 'bg-emerald-600/20 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-600/30'
+                  )}
+                >
+                  {deployMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  Deploy
+                </button>
+              </>
+            }
+          />
         </div>
       )}
 

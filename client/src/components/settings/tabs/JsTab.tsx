@@ -85,6 +85,30 @@ export function JsTab({ settings, defaults, diff, onChange }: Props) {
           <Toggle checked={settings.dropDebugger} onChange={(v) => onChange({ dropDebugger: v })} />
         </SettingField>
       </SettingCard>
+
+      <SettingCard title="Third-Party Scripts" description="Remove analytics, tracking, and marketing scripts. Replace with Cloudflare Zaraz for zero-JS tracking. Saves ~2MB of payload.">
+        <SettingField label="Remove Third-Party Scripts" description="Detect and remove GA4, FB Pixel, HubSpot, Hotjar, etc." isOverridden={diff?.removeThirdPartyScripts}>
+          <Toggle checked={settings.removeThirdPartyScripts} onChange={(v) => onChange({ removeThirdPartyScripts: v })} />
+        </SettingField>
+        {settings.removeThirdPartyScripts && (
+          <SettingField label="Action for Detected Scripts" description="Remove = delete tag (use Zaraz), Defer = keep but defer, Keep = no change" isOverridden={diff?.thirdPartyAction}>
+            <Select
+              value={settings.thirdPartyAction}
+              options={[
+                { value: 'remove', label: 'Remove (replace via Zaraz)' },
+                { value: 'defer', label: 'Defer (keep with defer attr)' },
+                { value: 'keep', label: 'Keep as-is' },
+              ]}
+              onChange={(v) => onChange({ thirdPartyAction: v })}
+            />
+          </SettingField>
+        )}
+        {settings.removeThirdPartyScripts && settings.thirdPartyAction === 'remove' && (
+          <div className="px-3 py-2 text-xs text-[hsl(var(--muted-foreground))] bg-[hsl(var(--muted))]/50 rounded-md mt-2">
+            Detected tools (GA4, Facebook Pixel, HubSpot, etc.) will be removed. A Zaraz setup guide is generated in each deployment with extracted tracking IDs for easy migration.
+          </div>
+        )}
+      </SettingCard>
     </div>
   );
 }

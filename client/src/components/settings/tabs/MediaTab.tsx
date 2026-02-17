@@ -9,7 +9,7 @@ export function MediaTab({ settings, defaults, diff, onChange }: Props) {
         <SettingField label="Enable Video Facades" isOverridden={diff?.facadesEnabled}>
           <Toggle checked={settings.facadesEnabled} onChange={(v) => onChange({ facadesEnabled: v })} />
         </SettingField>
-        <SettingField label="Poster Quality" description="YouTube thumbnail quality" isOverridden={diff?.posterQuality}>
+        <SettingField label="Poster Quality" description="YouTube thumbnail quality (fallback when screenshot fails)" isOverridden={diff?.posterQuality}>
           <Select
             value={settings.posterQuality}
             options={[
@@ -27,6 +27,24 @@ export function MediaTab({ settings, defaults, diff, onChange }: Props) {
         </SettingField>
         <SettingField label="Preconnect" description="Add preconnect hint for video CDN" isOverridden={diff?.preconnect}>
           <Toggle checked={settings.preconnect} onChange={(v) => onChange({ preconnect: v })} />
+        </SettingField>
+      </SettingCard>
+
+      <SettingCard title="Cloudflare Video & Image Hosting" description="Upload posters to CF Images and videos to CF Stream for CDN-edge delivery with automatic AVIF/WebP.">
+        <SettingField label="Use CF Images for Posters" description="Upload Playwright screenshots to Cloudflare Images CDN" isOverridden={diff?.useCfImages}>
+          <Toggle checked={settings.useCfImages} onChange={(v) => onChange({ useCfImages: v })} />
+        </SettingField>
+        <SettingField label="Use CF Stream for Background Video" description="Re-host background videos on Cloudflare Stream with HLS" isOverridden={diff?.useCfStream}>
+          <Toggle checked={settings.useCfStream} onChange={(v) => onChange({ useCfStream: v })} />
+        </SettingField>
+        <SettingField label="Above-Fold Detection" description="Auto-detect above-fold videos for priority loading" isOverridden={diff?.aboveTheFoldDetection}>
+          <Toggle checked={settings.aboveTheFoldDetection} onChange={(v) => onChange({ aboveTheFoldDetection: v })} />
+        </SettingField>
+        <SettingField label="Screenshot Timestamp (Click-to-Play)" description="Which second to capture for poster thumbnail" isOverridden={diff?.screenshotTimestamp}>
+          <Slider value={settings.screenshotTimestamp} min={0} max={30} step={1} onChange={(v) => onChange({ screenshotTimestamp: v })} />
+        </SettingField>
+        <SettingField label="Screenshot Timestamp (Background)" description="Background videos use an earlier frame to avoid black intros" isOverridden={diff?.screenshotTimestampBg}>
+          <Slider value={settings.screenshotTimestampBg} min={0} max={30} step={1} onChange={(v) => onChange({ screenshotTimestampBg: v })} />
         </SettingField>
       </SettingCard>
 
@@ -48,15 +66,36 @@ export function MediaTab({ settings, defaults, diff, onChange }: Props) {
         </SettingField>
       </SettingCard>
 
-      <SettingCard title="Platform Support">
+      <SettingCard title="Platform Support" description="Enable or disable facade processing per video platform">
         <SettingField label="YouTube" isOverridden={diff?.platforms?.youtube}>
-          <Toggle checked={settings.platforms.youtube} onChange={(v) => onChange({ platforms: { youtube: v } })} />
+          <Toggle checked={settings.platforms?.youtube} onChange={(v) => onChange({ platforms: { youtube: v } })} />
         </SettingField>
         <SettingField label="Vimeo" isOverridden={diff?.platforms?.vimeo}>
-          <Toggle checked={settings.platforms.vimeo} onChange={(v) => onChange({ platforms: { vimeo: v } })} />
+          <Toggle checked={settings.platforms?.vimeo} onChange={(v) => onChange({ platforms: { vimeo: v } })} />
         </SettingField>
         <SettingField label="Wistia" isOverridden={diff?.platforms?.wistia}>
-          <Toggle checked={settings.platforms.wistia} onChange={(v) => onChange({ platforms: { wistia: v } })} />
+          <Toggle checked={settings.platforms?.wistia} onChange={(v) => onChange({ platforms: { wistia: v } })} />
+        </SettingField>
+        <SettingField label="Loom" isOverridden={diff?.platforms?.loom}>
+          <Toggle checked={settings.platforms?.loom} onChange={(v) => onChange({ platforms: { loom: v } })} />
+        </SettingField>
+        <SettingField label="Bunny.net" isOverridden={diff?.platforms?.bunny}>
+          <Toggle checked={settings.platforms?.bunny} onChange={(v) => onChange({ platforms: { bunny: v } })} />
+        </SettingField>
+        <SettingField label="Mux" isOverridden={diff?.platforms?.mux}>
+          <Toggle checked={settings.platforms?.mux} onChange={(v) => onChange({ platforms: { mux: v } })} />
+        </SettingField>
+        <SettingField label="Dailymotion" isOverridden={diff?.platforms?.dailymotion}>
+          <Toggle checked={settings.platforms?.dailymotion} onChange={(v) => onChange({ platforms: { dailymotion: v } })} />
+        </SettingField>
+        <SettingField label="Streamable" isOverridden={diff?.platforms?.streamable}>
+          <Toggle checked={settings.platforms?.streamable} onChange={(v) => onChange({ platforms: { streamable: v } })} />
+        </SettingField>
+        <SettingField label="Twitch" isOverridden={diff?.platforms?.twitch}>
+          <Toggle checked={settings.platforms?.twitch} onChange={(v) => onChange({ platforms: { twitch: v } })} />
+        </SettingField>
+        <SettingField label="Direct MP4 / WordPress Video" isOverridden={diff?.platforms?.directMp4}>
+          <Toggle checked={settings.platforms?.directMp4} onChange={(v) => onChange({ platforms: { directMp4: v } })} />
         </SettingField>
       </SettingCard>
     </div>
