@@ -23,7 +23,7 @@ export async function runVerificationSuite(
       passed: perf >= 50,
       notes: `Performance: ${perf}, LCP ${((psi?.lcp ?? 0) / 1000).toFixed(1)}s`,
     };
-    onLog?.(result.ux.notes);
+    onLog?.(result.ux.notes ?? '');
   } catch (err) {
     result.ux = { passed: false, notes: (err as Error).message };
     onLog?.(`UX check failed: ${(err as Error).message}`);
@@ -52,7 +52,7 @@ export async function runVerificationSuite(
       passed: !!title && bodyText.length > 0,
       notes: title ? `Page loads: "${title.slice(0, 40)}..."` : 'Page failed to load',
     };
-    onLog?.(result.visual.notes);
+    onLog?.(result.visual.notes ?? '');
   } catch (err) {
     result.visual = { passed: false, notes: (err as Error).message };
     onLog?.(`Visual check failed: ${(err as Error).message}`);
@@ -80,7 +80,7 @@ export async function runVerificationSuite(
       passed: errors.length === 0,
       notes: errors.length > 0 ? `${errors.length} console error(s)` : 'No console errors',
     };
-    onLog?.(result.interactions.notes);
+    onLog?.(result.interactions.notes ?? '');
   } catch (err) {
     result.interactions = { passed: false, notes: (err as Error).message };
     onLog?.(`Interactions check failed: ${(err as Error).message}`);
