@@ -9,7 +9,7 @@ import { buildEmitter } from '../events/buildEmitter.js';
 import { deepMerge } from '../shared/settingsMerge.js';
 import { analyzeSite } from './analyzer.js';
 import { generateOptimizationPlan } from './planner.js';
-import { fetchFullPageSpeedData, isPageSpeedAvailable } from '../services/pagespeed.js';
+import { fetchFullPageSpeedData, isPageSpeedAvailable, type OptimizationWorkflow } from '../services/pagespeed.js';
 import { aiReviewAndAdjust } from './reviewer.js';
 import { compareVisuals } from '../verification/visual.js';
 import { verifyFunctionalBehavior } from '../verification/functional.js';
@@ -197,15 +197,15 @@ async function runOptimizationAgentInternal(
     buildEmitter.emit(`agent:${siteId}:phase`, phase);
   };
 
-  let inventory: SiteInventory;
-  let plan: { settings?: Record<string, any>; [k: string]: any };
+  let inventory!: SiteInventory;
+  let plan!: { settings?: Record<string, any>; [k: string]: any };
   let pageSpeedData: unknown = null;
   let currentSettings: Record<string, any>;
   let iterationHistory: IterationResult[];
 
   if (isResume) {
     inventory = opts.inventory!;
-    plan = opts.plan || { settings: opts.currentSettings };
+    plan = opts.plan ?? { settings: opts.currentSettings };
     pageSpeedData = opts.pageSpeedData;
     currentSettings = opts.currentSettings || {};
     iterationHistory = opts.iterationHistory || [];
@@ -264,7 +264,7 @@ async function runOptimizationAgentInternal(
     if (!isResume || !opts.plan) {
       setPhase('planning');
       log('PHASE 1B: AI generating optimization plan...');
-      plan = await generateOptimizationPlan(inventory, log, pageSpeedData);
+      plan = await generateOptimizationPlan(inventory, log, pageSpeedData as OptimizationWorkflow | null);
       currentSettings = plan.settings || {};
       await saveCheckpoint({ inventory: inventory as any, plan: plan as any, pageSpeedData, currentSettings, lastCompletedPhase: 'planning' });
     }
@@ -272,9 +272,6 @@ async function runOptimizationAgentInternal(
     log(`Risks: ${plan.risks?.length || 0}`);
 
     // ── ITERATION LOOP ──
-    const iterationHistory: IterationResult[] = [];
-    let finalVerdict = 'needs-changes';
-
     const startIteration = isResume ? iterationHistory.length + 1 : 1;
     for (let iteration = startIteration; iteration <= MAX_ITERATIONS; iteration++) {
       if (state.aborted) { log('Agent aborted by user.'); break; }
