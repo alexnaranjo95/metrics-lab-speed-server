@@ -136,7 +136,7 @@ async function start() {
   await app.register(websocketRoutes);
 
   if (clientDistExists) {
-    // Static files with wildcard: true (registers /* last, so API routes match first)
+    // Static files with wildcard: true (registers /* - handles / and /assets/* etc.)
     await app.register(fastifyStatic, {
       root: clientDistPath,
       prefix: '/',
@@ -144,10 +144,6 @@ async function start() {
       maxAge: '1y',
       immutable: true,
     });
-    // Explicit root handler - never cache index.html
-    app.get('/', async (_, reply) =>
-      reply.sendFile('index.html', clientDistPath, indexHtmlOptions)
-    );
     // SPA fallback: serve index.html for non-API/WS routes that static couldn't serve
     app.setNotFoundHandler(async (req, reply) => {
       const pathname = req.url.split('?')[0];
