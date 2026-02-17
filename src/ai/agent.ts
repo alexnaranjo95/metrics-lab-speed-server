@@ -197,8 +197,9 @@ async function runOptimizationAgentInternal(
     buildEmitter.emit(`agent:${siteId}:phase`, phase);
   };
 
-  let inventory!: SiteInventory;
-  let plan!: { settings?: Record<string, any>; [k: string]: any };
+  // Initialized below; TS needs explicit init for strict control-flow analysis
+  let inventory: SiteInventory = null as unknown as SiteInventory;
+  let plan: { settings?: Record<string, any>; [k: string]: any } = { settings: {} };
   let pageSpeedData: unknown = null;
   let currentSettings: Record<string, any>;
   let iterationHistory: IterationResult[];
