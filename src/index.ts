@@ -106,22 +106,24 @@ async function start() {
   console.log(`API key configured: ${config.MASTER_API_KEY !== 'dev_master_key_change_in_production' ? 'yes' : 'USING DEFAULT (check env vars!)'}`);
   console.log(`Claude AI integration: ${config.ANTHROPIC_API_KEY ? 'READY' : 'DISABLED (no ANTHROPIC_API_KEY)'}`);
 
-  if (clientDistExists) {
-    await app.register(fastifyStatic, {
-      root: clientDistPath,
-      prefix: '/',
-      wildcard: false,
-      maxAge: '1y',
-      immutable: true,
+  // Debug route (before static so it's not caught by wildcard)
+  app.get('/debug/spa', async (_, reply) => {
+    let assets: string[] = [];
+    try {
+      assets = fs.readdirSync(clientDistPath);
+    } catch {
+      /* ignore */
+    }
+    return reply.send({
+      clientDistPath,
+      clientDistExists,
+      indexHtmlExists: fs.existsSync(path.join(clientDistPath, 'index.html')),
+      cwd: process.cwd(),
+      assets,
     });
-    // Explicitly serve index.html for root (SPA entry)
-    // Never cache index.html to avoid stale HTML pointing to old asset hashes after deploys
-    app.get('/', async (_, reply) =>
-      reply.sendFile('index.html', clientDistPath, indexHtmlOptions)
-    );
-  }
+  });
 
-  // Register API routes
+  // Register API routes BEFORE static so they take precedence
   await app.register(settingsRoutes, { prefix: '/api' });
   await app.register(aiAgentRoutes, { prefix: '/api' });
   await app.register(siteRoutes, { prefix: '/api' });
@@ -133,10 +135,23 @@ async function start() {
   await app.register(webhookRoutes, { prefix: '/webhooks' });
   await app.register(websocketRoutes);
 
-  // SPA fallback: serve index.html for all non-API, non-WS routes
   if (clientDistExists) {
+    // Static files with wildcard: true (registers /* last, so API routes match first)
+    await app.register(fastifyStatic, {
+      root: clientDistPath,
+      prefix: '/',
+      wildcard: true,
+      maxAge: '1y',
+      immutable: true,
+    });
+    // Explicit root handler - never cache index.html
+    app.get('/', async (_, reply) =>
+      reply.sendFile('index.html', clientDistPath, indexHtmlOptions)
+    );
+    // SPA fallback: serve index.html for non-API/WS routes that static couldn't serve
     app.setNotFoundHandler(async (req, reply) => {
-      if (req.url.startsWith('/api/') || req.url.startsWith('/ws/') || req.url.startsWith('/webhooks/')) {
+      const pathname = req.url.split('?')[0];
+      if (pathname.startsWith('/api/') || pathname.startsWith('/ws/') || pathname.startsWith('/webhooks/')) {
         return reply.code(404).send({ error: 'Not found' });
       }
       return reply.sendFile('index.html', clientDistPath, indexHtmlOptions);

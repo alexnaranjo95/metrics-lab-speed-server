@@ -1,5 +1,7 @@
 # ── Stage 1: Build client (React SPA with Vite) ──
 FROM node:20-slim AS client-builder
+ARG VITE_BASE_PATH=/
+ENV VITE_BASE_PATH=$VITE_BASE_PATH
 
 WORKDIR /app/client
 COPY client/package.json client/package-lock.json* ./

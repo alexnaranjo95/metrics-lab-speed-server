@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { API_BASE } from '@/lib/api';
 
 export interface PerfTestStatus {
   testId: string;
@@ -16,7 +17,7 @@ export function usePerformanceSSE(siteId: string | undefined, enabled: boolean =
     if (!siteId || !enabled) return;
 
     const token = localStorage.getItem('apiKey') || '';
-    const es = new EventSource(`/api/sites/${siteId}/performance/stream?token=${token}`);
+    const es = new EventSource(`${API_BASE}/sites/${siteId}/performance/stream?token=${token}`);
     esRef.current = es;
 
     es.onopen = () => setIsConnected(true);

@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { API_BASE } from '@/lib/api';
 
 export interface BuildLogEntry {
   timestamp: string;
@@ -29,7 +30,9 @@ export function useBuildLogs({ buildId, enabled = true }: UseSSEOptions) {
     if (!enabled || !buildId) return;
 
     const token = localStorage.getItem('apiKey') || '';
-    const url = token ? `/api/builds/${buildId}/logs?token=${encodeURIComponent(token)}` : `/api/builds/${buildId}/logs`;
+    const url = token
+      ? `${API_BASE}/builds/${buildId}/logs?token=${encodeURIComponent(token)}`
+      : `${API_BASE}/builds/${buildId}/logs`;
     const source = new EventSource(url);
     sourceRef.current = source;
 

@@ -3,7 +3,9 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 
+const basePath = process.env.VITE_BASE_PATH || '/';
 export default defineConfig({
+  base: basePath,
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -14,8 +16,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': { target: 'http://localhost:3002', changeOrigin: true },
-      '/ws': { target: 'ws://localhost:3002', ws: true },
+      '/api': { target: 'http://localhost:3003', changeOrigin: true },
+      '/ws': { target: 'ws://localhost:3003', ws: true },
     },
   },
 });

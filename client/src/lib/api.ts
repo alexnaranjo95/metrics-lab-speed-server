@@ -1,4 +1,5 @@
-const API_BASE = '/api';
+const base = import.meta.env.BASE_URL || '/';
+export const API_BASE = base === '/' ? '/api' : `${base.replace(/\/$/, '')}/api`;
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${url}`, {

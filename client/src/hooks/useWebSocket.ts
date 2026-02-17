@@ -18,7 +18,9 @@ export function useScreencastWebSocket({ buildId, enabled = true }: UseWebSocket
     if (!enabled || !buildId) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/build/${buildId}/screen`);
+    const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+    const wsPath = base ? `${base}/ws/build/${buildId}/screen` : `/ws/build/${buildId}/screen`;
+    const ws = new WebSocket(`${protocol}//${window.location.host}${wsPath}`);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
 

@@ -2,8 +2,9 @@ services:
   server:
     build: .
     ports:
-      - "3002:3002"
+      - "3003:3002"
     environment:
+      - PORT=3002
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/metrics_lab_speed
       - REDIS_HOST=redis
       - REDIS_PORT=6379
