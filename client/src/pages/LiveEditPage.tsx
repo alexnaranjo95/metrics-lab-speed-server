@@ -12,12 +12,17 @@ import {
   Gauge,
   Bug,
   FileDiff,
+  ChevronDown,
+  ChevronRight,
+  FileCode,
 } from 'lucide-react';
 
 export function LiveEditPage() {
   const { siteId } = useParams<{ siteId: string }>();
   const queryClient = useQueryClient();
   const [screenshotKey, setScreenshotKey] = useState(Date.now());
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const [editScope, setEditScope] = useState<string[]>([]);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const hasKey = !!localStorage.getItem('apiKey');
@@ -27,6 +32,14 @@ export function LiveEditPage() {
     queryFn: () => api.getLiveEditStatus(siteId!),
     enabled: !!siteId && hasKey,
   });
+
+  const { data: filesData } = useQuery({
+    queryKey: ['live-edit-files', siteId],
+    queryFn: () => api.getLiveEditFiles(siteId!),
+    enabled: !!siteId && hasKey && !!status?.hasWorkspace,
+  });
+
+  const htmlFiles = (filesData?.files ?? []).filter((f) => f.endsWith('.html')).sort();
 
   const auditMutation = useMutation({
     mutationFn: (type: 'speed' | 'bugs' | 'visual') => api.liveEditAudit(siteId!, type),
@@ -69,18 +82,26 @@ export function LiveEditPage() {
 
   if (!status?.hasWorkspace) {
     return (
-      <div className="p-8 text-center">
+      <div className="p-8 text-center max-w-md mx-auto">
         <h2 className="text-lg font-semibold mb-2">Live Edit Unavailable</h2>
-        <p className="text-sm text-[hsl(var(--muted-foreground))] mb-4">
-          Run a build first to enable Live Edit.
+        <p className="text-sm text-[hsl(var(--muted-foreground))] mb-6">
+          Run a build first to create an editable workspace. The build output will be copied locally for AI-assisted editing.
         </p>
-        <Link
-          to={`/sites/${siteId}`}
-          className="inline-flex items-center gap-2 text-[hsl(var(--primary))] hover:underline"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to Site
-        </Link>
+        <div className="flex flex-wrap justify-center gap-3">
+          <Link
+            to={`/sites/${siteId}/builds`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90"
+          >
+            View Builds & Run Build
+          </Link>
+          <Link
+            to={`/sites/${siteId}`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Site
+          </Link>
+        </div>
       </div>
     );
   }
@@ -116,10 +137,69 @@ export function LiveEditPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1 min-h-0">
         {/* Optimization Chat */}
         <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden flex flex-col min-h-0">
+          {/* Edit Scope selector */}
+          {htmlFiles.length > 0 && (
+            <div className="border-b border-[hsl(var(--border))]">
+              <button
+                type="button"
+                onClick={() => setScopeOpen((o) => !o)}
+                className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium hover:bg-[hsl(var(--muted))]/50"
+              >
+                {scopeOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                <FileCode className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
+                Edit scope
+                {editScope.length > 0 ? (
+                  <span className="text-xs text-[hsl(var(--primary))]">
+                    ({editScope.length} selected)
+                  </span>
+                ) : (
+                  <span className="text-xs text-[hsl(var(--muted-foreground))]">(all pages)</span>
+                )}
+              </button>
+              {scopeOpen && (
+                <div className="px-4 pb-4 pt-0 space-y-2 max-h-40 overflow-y-auto">
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                    Select which pages the AI may edit. Leave all unchecked to allow all pages.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {htmlFiles.map((path) => {
+                      const checked = editScope.includes(path);
+                      return (
+                        <label
+                          key={path}
+                          className={cn(
+                            'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs cursor-pointer border transition-colors',
+                            checked
+                              ? 'bg-[hsl(var(--primary))]/15 border-[hsl(var(--primary))]/50 text-[hsl(var(--foreground))]'
+                              : 'border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]/30'
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setEditScope((s) => [...s, path]);
+                              } else {
+                                setEditScope((s) => s.filter((p) => p !== path));
+                              }
+                            }}
+                            className="rounded border-[hsl(var(--input))]"
+                          />
+                          {path}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <OptimizationChat
             siteId={siteId}
             onDeploy={handleDeploySuccess}
             className="flex-1 min-h-0"
+            editScope={editScope.length > 0 ? editScope : undefined}
             quickActions={
               <>
                 <button

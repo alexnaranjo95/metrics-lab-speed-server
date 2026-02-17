@@ -167,6 +167,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
         }
         emit('js', 'info', result.removed ? `Removed ${asset.localPath}` : `Optimized ${asset.localPath}`, { assetUrl: url, savings: { before: result.originalBytes, after: result.optimizedBytes } });
       } catch (err) {
+        emit('js', 'warn', `JS optimization failed for ${asset.localPath}: ${(err as Error).message}`, { assetUrl: url });
         console.warn(`[optimize] JS optimization failed for ${url}:`, (err as Error).message);
       }
     }
@@ -218,6 +219,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       html = updateCssReferences(html, cssRenames);
       html = updateJsReferences(html, jsRenames);
     } catch (err) {
+      emit('html', 'warn', `CSS/JS reference update failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
       console.error(`[optimize] CSS/JS reference update failed for ${page.path}:`, (err as Error).message);
     }
 
@@ -226,6 +228,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       try {
         html = await optimizeHtml(html, settings);
       } catch (err) {
+        emit('html', 'warn', `WP bloat removal failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
         console.error(`[optimize] WP bloat removal failed for ${page.path}:`, (err as Error).message);
       }
     } else if (i === 0) {
@@ -248,6 +251,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
           console.log(`[optimize] CLS results: ${r.imagesDimensionsInjected} images fixed, ${r.fontsOptimized} fonts optimized, ${r.dynamicContentContainersReserved} containers reserved, est. improvement: ${r.estimatedCLSImprovement.toFixed(3)}`);
         }
       } catch (err) {
+        emit('html', 'warn', `CLS optimization failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
         console.error(`[optimize] CLS optimization failed for ${page.path}:`, (err as Error).message);
       }
     }
@@ -268,6 +272,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
           console.log(`[optimize] SEO results: ${r.metaTagsInjected} meta tags, ${r.altAttributesAdded} alt attributes, ${r.linksOptimized} links optimized, est. score: ${r.estimatedSEOScoreAfter}/100`);
         }
       } catch (err) {
+        emit('html', 'warn', `SEO optimization failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
         console.error(`[optimize] SEO optimization failed for ${page.path}:`, (err as Error).message);
       }
     }
@@ -320,6 +325,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
 
       html = $scan.html();
     } catch (err) {
+      emit('html', 'warn', `Script scanning failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
       console.error(`[optimize] Script scanning failed for ${page.path}:`, (err as Error).message);
     }
 
@@ -334,6 +340,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       html = videoResult.html;
       stats.facades.total += videoResult.facadesApplied;
     } catch (err) {
+      emit('html', 'warn', `Video facade replacement failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
       console.error(`[optimize] Video facade replacement failed for ${page.path}:`, (err as Error).message);
     }
 
@@ -344,6 +351,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       stats.facades.total += widgetResult.facadesApplied;
       stats.scriptsRemoved += widgetResult.scriptsRemoved;
     } catch (err) {
+      emit('html', 'warn', `Widget facade replacement failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
       console.error(`[optimize] Widget facade replacement failed for ${page.path}:`, (err as Error).message);
     }
 
@@ -352,6 +360,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       try {
         html = rewriteImageTags(html, workDir, settings);
       } catch (err) {
+        emit('html', 'warn', `Image tag rewriting failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
         console.error(`[optimize] Image tag rewriting failed for ${page.path}:`, (err as Error).message);
       }
 
@@ -360,6 +369,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
         try {
           html = await injectImageDimensions(html, workDir);
         } catch (err) {
+          emit('html', 'warn', `Image dimension injection failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
           console.error(`[optimize] Image dimension injection failed for ${page.path}:`, (err as Error).message);
         }
       }
@@ -371,6 +381,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
         const fontResult = await optimizeFonts(html, workDir, settings);
         html = fontResult.html;
       } catch (err) {
+        emit('fonts', 'warn', `Font optimization failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
         console.error(`[optimize] Font optimization failed for ${page.path}:`, (err as Error).message);
       }
     }
@@ -380,12 +391,14 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       try {
         html = moveHeadScriptsToBody(html, settings);
       } catch (err) {
+        emit('html', 'warn', `Script relocation failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
         console.error(`[optimize] Script relocation failed for ${page.path}:`, (err as Error).message);
       }
 
       try {
         html = addDeferToScripts(html, settings);
       } catch (err) {
+        emit('html', 'warn', `Script defer failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
         console.error(`[optimize] Script defer failed for ${page.path}:`, (err as Error).message);
       }
     }
@@ -408,6 +421,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
         const critResult = await extractCriticalCss(html, cssFiles, settings.css);
         html = critResult.html;
       } catch (err) {
+        emit('css', 'warn', `Async CSS conversion failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
         console.error(`[optimize] Async CSS conversion failed for ${page.path}:`, (err as Error).message);
         try { html = makeStylesheetsAsync(html); } catch { /* last resort */ }
       }
@@ -417,6 +431,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
     try {
       html = injectResourceHints(html);
     } catch (err) {
+      emit('html', 'warn', `Resource hints injection failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
       console.error(`[optimize] Resource hints injection failed for ${page.path}:`, (err as Error).message);
     }
 
@@ -447,6 +462,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
           console.log(`[optimize] CF Images migration: ${r.imagesMigrated} migrated, ${r.imagesFailed} failed`);
         }
       } catch (err) {
+        emit('images', 'warn', `CF Images migration failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
         console.error(`[optimize] CF Images migration failed for ${page.path}:`, (err as Error).message);
       }
     }
@@ -469,6 +485,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
         }
       }
     } catch (err) {
+      emit('css', 'warn', `Critical CSS extraction failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
       console.error(`[optimize] Critical CSS extraction failed for ${page.path}:`, (err as Error).message);
     }
 
@@ -483,6 +500,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
         }
       }
     } catch (err) {
+      emit('html', 'warn', `SVG sprite optimization failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
       console.error(`[optimize] SVG sprite optimization failed for ${page.path}:`, (err as Error).message);
     }
 
@@ -495,6 +513,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       });
       html = $hints.html();
     } catch (err) {
+      emit('html', 'warn', `Priority resource hints failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
       console.error(`[optimize] Priority resource hints failed for ${page.path}:`, (err as Error).message);
     }
 
@@ -527,6 +546,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
           removeTagWhitespace: a.removeTagWhitespace,
         });
       } catch (err) {
+        emit('html', 'warn', `Final HTML minification failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
         console.error(`[optimize] Final HTML minification failed for ${page.path}:`, (err as Error).message);
       }
     }

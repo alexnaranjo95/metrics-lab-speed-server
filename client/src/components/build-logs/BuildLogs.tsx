@@ -1,11 +1,13 @@
 import { useRef, useEffect, useState } from 'react';
 import { useBuildLogs, type BuildLogEntry } from '@/hooks/useSSE';
 import { cn } from '@/lib/utils';
-import { Terminal, Wifi, WifiOff, ChevronDown } from 'lucide-react';
+import { Terminal, Wifi, WifiOff, ChevronDown, AlertCircle } from 'lucide-react';
 
 interface BuildLogsProps {
   buildId: string;
   enabled?: boolean;
+  /** Error message from parent (e.g. build API) — shown when logs loaded from DB after refresh */
+  errorMessage?: string | null;
 }
 
 const LEVEL_COLORS: Record<string, string> = {
@@ -26,8 +28,9 @@ const PHASE_COLORS: Record<string, string> = {
   measure: 'text-indigo-400',
 };
 
-export function BuildLogs({ buildId, enabled = true }: BuildLogsProps) {
-  const { logs, phase, isComplete, isConnected } = useBuildLogs({ buildId, enabled });
+export function BuildLogs({ buildId, enabled = true, errorMessage }: BuildLogsProps) {
+  const { logs, phase, isComplete, success, completionError, isConnected } = useBuildLogs({ buildId, enabled });
+  const displayError = completionError ?? errorMessage ?? null;
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -82,6 +85,14 @@ export function BuildLogs({ buildId, enabled = true }: BuildLogsProps) {
           </span>
         </div>
       </div>
+
+      {/* Error banner when failed */}
+      {isComplete && success === false && displayError && (
+        <div className="mx-3 mt-2 flex items-start gap-2 rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-sm text-red-200">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>{displayError}</span>
+        </div>
+      )}
 
       {/* Log area */}
       <div

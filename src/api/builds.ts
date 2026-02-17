@@ -188,6 +188,65 @@ export async function buildRoutes(app: FastifyInstance) {
     return { ...updated };
   });
 
+  // ── POST /api/sites/:siteId/builds/:buildId/retry — Retry/resume a failed build ──
+  app.post('/sites/:siteId/builds/:buildId/retry', async (request, reply) => {
+    const { siteId, buildId } = request.params as { siteId: string; buildId: string };
+
+    const build = await db.query.builds.findFirst({
+      where: and(eq(builds.id, buildId), eq(builds.siteId, siteId)),
+    });
+
+    if (!build) {
+      return reply.status(404).send({ error: 'Build not found' });
+    }
+
+    if (build.status !== 'failed') {
+      return reply.status(400).send({
+        error: build.status === 'success'
+          ? 'Build already succeeded. Trigger a new build instead.'
+          : 'Build is still in progress. Cancel it first if needed.',
+        status: build.status,
+      });
+    }
+
+    // Check no other build is in progress for this site
+    const inProgress = await db.query.builds.findFirst({
+      where: and(
+        eq(builds.siteId, siteId),
+        inArray(builds.status, ['queued', 'crawling', 'optimizing', 'deploying'])
+      ),
+    });
+    if (inProgress && inProgress.id !== buildId) {
+      return reply.status(409).send({
+        error: 'Another build is already in progress',
+        buildId: inProgress.id,
+      });
+    }
+
+    await db.update(builds).set({
+      status: 'queued',
+      errorMessage: null,
+      errorDetails: null,
+    }).where(eq(builds.id, buildId));
+
+    await buildQueue.add(
+      'build' as any,
+      {
+        buildId,
+        siteId,
+        scope: ((build.scope || 'full') as 'full' | 'partial' | 'single_page'),
+        pages: undefined,
+      },
+      { jobId: `${buildId}_retry_${Date.now()}` }
+    );
+
+    return reply.status(202).send({
+      message: 'Build requeued. Will resume from checkpoint if available.',
+      buildId,
+      status: 'queued',
+    });
+  });
+
   // ── POST /api/sites/:siteId/builds/cancel-stale — Cancel stuck builds ──
   app.post('/sites/:siteId/builds/cancel-stale', async (request, reply) => {
     const { siteId } = request.params as { siteId: string };

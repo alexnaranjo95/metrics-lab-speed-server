@@ -9,7 +9,7 @@ import { JsTab } from './tabs/JsTab';
 import { HtmlFontsTab } from './tabs/HtmlFontsTab';
 import { CacheTab } from './tabs/CacheTab';
 import { AiBuildTab } from './tabs/AiBuildTab';
-import { Image, Video, Palette, Code2, FileText, Shield, Bot, RotateCcw, Save, X } from 'lucide-react';
+import { Image, Video, Palette, Code2, FileText, Shield, Bot, RotateCcw, Save, X, AlertCircle } from 'lucide-react';
 
 const TABS = [
   { id: 'images', label: 'Images', icon: Image },
@@ -44,9 +44,10 @@ export function SettingsPanel({ siteId }: SettingsPanelProps) {
   const [draft, setDraft] = useState<Record<string, any>>({});
   const queryClient = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['settings', siteId],
     queryFn: () => api.getSettings(siteId),
+    enabled: !!siteId,
   });
 
   const { data: diffData } = useQuery({
@@ -87,11 +88,13 @@ export function SettingsPanel({ siteId }: SettingsPanelProps) {
   }, []);
 
   // Compute the effective settings (server data + draft overlay)
+  // Fall back to defaults when settings is missing (e.g. API returns only defaults)
   const effectiveSettings = useMemo(() => {
-    if (!data?.settings) return null;
-    if (Object.keys(draft).length === 0) return data.settings;
-    return deepMergeDraft(data.settings, draft);
-  }, [data?.settings, draft]);
+    const base = data?.settings ?? data?.defaults;
+    if (!base) return null;
+    if (Object.keys(draft).length === 0) return base;
+    return deepMergeDraft(base, draft);
+  }, [data?.settings, data?.defaults, draft]);
 
   const hasDraftChanges = Object.keys(draft).length > 0;
 
@@ -179,7 +182,22 @@ export function SettingsPanel({ siteId }: SettingsPanelProps) {
 
       {/* Tab content */}
       <div className="p-5 pb-20">
-        {settings && (
+        {isError && (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <AlertCircle className="h-12 w-12 text-[hsl(var(--destructive))] mb-3" />
+            <p className="text-sm font-medium mb-1">Failed to load settings</p>
+            <p className="text-xs text-[hsl(var(--muted-foreground))] mb-4 max-w-md">
+              {error instanceof Error ? error.message : 'The settings API could not be reached. Check your API key and network.'}
+            </p>
+            <button
+              onClick={() => refetch()}
+              className="px-4 py-2 text-sm font-medium rounded-md bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+        {!isError && settings && (
           <>
             {activeTab === 'images' && <ImageTab settings={settings.images} defaults={defaults?.images} diff={diff.images} onChange={(v) => updateField(['images'], v)} migrationSettings={settings.imageMigration} migrationDiff={diff.imageMigration} onMigrationChange={(v) => updateField(['imageMigration'], v)} />}
             {activeTab === 'media' && <MediaTab settings={settings.video} defaults={defaults?.video} diff={diff.video} onChange={(v) => updateField(['video'], v)} />}

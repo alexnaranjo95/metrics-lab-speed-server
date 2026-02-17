@@ -11,8 +11,8 @@ export interface BuildJobData {
 export const buildQueue = new Queue<BuildJobData>('builds', {
   connection: redisConnectionOptions,
   defaultJobOptions: {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 30000 },
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 60000 },
     removeOnComplete: { count: 100 },
     removeOnFail: { count: 50 },
   },

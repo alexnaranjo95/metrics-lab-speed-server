@@ -23,6 +23,8 @@ interface OptimizationChatProps {
   className?: string;
   /** Optional: render custom actions (e.g. audit, deploy buttons) */
   quickActions?: React.ReactNode;
+  /** Optional: file paths to restrict edits to (e.g. ['index.html', 'about/index.html']) */
+  editScope?: string[];
 }
 
 export function OptimizationChat({
@@ -31,6 +33,7 @@ export function OptimizationChat({
   deployKey = 0,
   className,
   quickActions,
+  editScope,
 }: OptimizationChatProps) {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; plan?: PlanData }>>([]);
@@ -45,8 +48,8 @@ export function OptimizationChat({
   const { items, isConnected, clear } = useLiveEditStream({ siteId, enabled: !!siteId });
 
   const chatMutation = useMutation({
-    mutationKey: ['live-edit-chat', siteId],
-    mutationFn: (msg: string) => api.liveEditChat(siteId, msg) as Promise<{ planId?: string }>,
+    mutationKey: ['live-edit-chat', siteId, editScope],
+    mutationFn: (msg: string) => api.liveEditChat(siteId, msg, editScope?.length ? editScope : undefined) as Promise<{ planId?: string }>,
     onSuccess: (data) => {
       if (data.planId) setPendingPlan((p) => (p ? { ...p, planId: data.planId! } : null));
     },

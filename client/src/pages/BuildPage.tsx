@@ -17,9 +17,30 @@ import {
   Bug,
   FileDiff,
   RefreshCw,
+  RotateCcw,
 } from 'lucide-react';
 
 const PHASES = ['crawl', 'images', 'css', 'js', 'html', 'fonts', 'deploy'];
+
+/** Returns a contextual hint based on where the build failed */
+function getErrorSuggestion(details?: { phase?: string; step?: string } | null): string | null {
+  if (!details) return null;
+  const phase = details.phase ?? '';
+  const step = details.step ?? '';
+  if (phase === 'crawling' || step === 'crawl') {
+    return 'Site may be unreachable, behind bot protection, or blocking the crawler.';
+  }
+  if (phase === 'optimizing' && step === 'images') {
+    return 'Check image URLs and formats; large images may time out.';
+  }
+  if (phase === 'optimizing' && step === 'css') {
+    return 'Review CSS structure and PurgeCSS safelist.';
+  }
+  if (phase === 'deploying' || step === 'deploy') {
+    return 'Check Cloudflare credentials and project configuration.';
+  }
+  return null;
+}
 
 const STATUS_MAP: Record<string, string> = {
   queued: 'crawl',
@@ -72,6 +93,16 @@ export function BuildPage() {
       queryClient.invalidateQueries({ queryKey: ['live-edit-status', siteId] });
       queryClient.invalidateQueries({ queryKey: ['site-status', siteId] });
       queryClient.invalidateQueries({ queryKey: ['build', siteId, buildId] });
+    },
+    onError: (err: Error) => alert(err.message),
+  });
+
+  const retryBuildMutation = useMutation({
+    mutationFn: () => api.retryBuild(siteId!, buildId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['build', siteId, buildId] });
+      queryClient.invalidateQueries({ queryKey: ['site-status', siteId] });
+      setPollEnabled(true);
     },
     onError: (err: Error) => alert(err.message),
   });
@@ -169,7 +200,7 @@ export function BuildPage() {
           edgeUrl={edgeUrl}
           deployKey={deployKey}
         />
-        <BuildLogs buildId={buildId} enabled={true} />
+        <BuildLogs buildId={buildId} enabled={true} errorMessage={build.errorMessage} />
       </div>
 
       {/* Before / After Comparison — shown when build is complete */}
@@ -313,11 +344,37 @@ export function BuildPage() {
         </div>
       )}
 
-      {/* Error display */}
-      {build.errorMessage && (
+      {/* Error display + Retry */}
+      {build.status === 'failed' && build.errorMessage && (
         <div className="rounded-lg border border-[hsl(var(--destructive))]/30 bg-[hsl(var(--destructive))]/5 p-4">
-          <h3 className="text-sm font-semibold text-[hsl(var(--destructive))] mb-1">Error</h3>
-          <p className="text-sm text-[hsl(var(--destructive))]">{build.errorMessage}</p>
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <h3 className="text-sm font-semibold text-[hsl(var(--destructive))] mb-1">Build Failed</h3>
+              <p className="text-sm text-[hsl(var(--destructive))]">{build.errorMessage}</p>
+              {(build.errorDetails?.phase || build.errorDetails?.step) && (
+                <p className="text-xs text-[hsl(var(--muted-foreground))] mt-2">
+                  Failed during: {[build.errorDetails.phase, build.errorDetails.step].filter(Boolean).join(' – ')}
+                </p>
+              )}
+              {getErrorSuggestion(build.errorDetails) && (
+                <p className="text-xs text-[hsl(var(--muted-foreground))] mt-2 italic">
+                  {getErrorSuggestion(build.errorDetails)}
+                </p>
+              )}
+              <p className="text-xs text-[hsl(var(--muted-foreground))] mt-2">
+                Retry to resume from the last checkpoint (crawl data is preserved).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => retryBuildMutation.mutate()}
+              disabled={retryBuildMutation.isPending}
+              className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50"
+            >
+              {retryBuildMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+              Retry & Resume
+            </button>
+          </div>
         </div>
       )}
     </div>

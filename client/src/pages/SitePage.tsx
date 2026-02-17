@@ -32,6 +32,12 @@ export function SitePage() {
     enabled: !!siteId && hasKey,
   });
 
+  const { data: liveEditStatus } = useQuery({
+    queryKey: ['live-edit-status', siteId],
+    queryFn: () => api.getLiveEditStatus(siteId!),
+    enabled: !!siteId && hasKey,
+  });
+
   const triggerMutation = useMutation({
     mutationFn: async () => {
       try {
@@ -88,7 +94,7 @@ export function SitePage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {site.edgeUrl && (
+          {liveEditStatus?.hasWorkspace ? (
             <Link
               to={`/sites/${siteId}/live-edit`}
               className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-cyan-600 text-white hover:bg-cyan-700 transition-colors"
@@ -96,7 +102,25 @@ export function SitePage() {
               <Pencil className="h-4 w-4" />
               Live Edit
             </Link>
-          )}
+          ) : liveEditStatus && !liveEditStatus.hasWorkspace ? (
+            <Link
+              to={`/sites/${siteId}/builds`}
+              className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-cyan-600/70 text-cyan-800 dark:text-cyan-200 border border-cyan-500/50 hover:bg-cyan-600/80 transition-colors"
+              title="Run a build first to enable Live Edit"
+            >
+              <Pencil className="h-4 w-4" />
+              Live Edit
+              <span className="text-xs opacity-90">(run build first)</span>
+            </Link>
+          ) : site.edgeUrl ? (
+            <Link
+              to={`/sites/${siteId}/live-edit`}
+              className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-cyan-600 text-white hover:bg-cyan-700 transition-colors"
+            >
+              <Pencil className="h-4 w-4" />
+              Live Edit
+            </Link>
+          ) : null}
           <Link
             to={`/sites/${siteId}/performance`}
             className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"

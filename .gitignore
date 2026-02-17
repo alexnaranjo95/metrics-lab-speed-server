@@ -3,4 +3,6 @@ dist/
 .env
 *.log
 /tmp/builds/
+data/builds/
+data/live-edit/
 .DS_Store

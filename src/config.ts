@@ -76,6 +76,10 @@ export const config = {
   IMAGE_MAX_SIZE_MB: intEnv('IMAGE_MAX_SIZE_MB', 10),
   IMAGE_BATCH_SIZE: intEnv('IMAGE_BATCH_SIZE', 200),
 
+  // Build workspace (persistent for checkpoint/resume; use /tmp for ephemeral)
+  BUILD_WORK_DIR: optionalEnv('BUILD_WORK_DIR', './data/builds') as string,
+  BUILD_CHECKPOINT_MAX_AGE_HOURS: intEnv('BUILD_CHECKPOINT_MAX_AGE_HOURS', 24),
+
   // Dashboard
   DASHBOARD_WEBHOOK_URL: optionalEnv('DASHBOARD_WEBHOOK_URL'),
 

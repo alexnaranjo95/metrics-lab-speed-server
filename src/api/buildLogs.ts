@@ -48,7 +48,12 @@ export const buildLogRoutes: FastifyPluginAsync = async (app) => {
 
       // If build is already completed, send the complete event and close
       if (build.status === 'success' || build.status === 'failed') {
-        reply.raw.write(`event: complete\ndata: ${JSON.stringify({ status: build.status })}\n\n`);
+        const completeData = {
+          status: build.status,
+          success: build.status === 'success',
+          ...(build.status === 'failed' && build.errorMessage ? { error: build.errorMessage } : {}),
+        };
+        reply.raw.write(`event: complete\ndata: ${JSON.stringify(completeData)}\n\n`);
         reply.raw.end();
         return;
       }

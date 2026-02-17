@@ -23,6 +23,8 @@ export function useBuildLogs({ buildId, enabled = true }: UseSSEOptions) {
   const [logs, setLogs] = useState<BuildLogEntry[]>([]);
   const [phase, setPhase] = useState<string>('');
   const [isComplete, setIsComplete] = useState(false);
+  const [success, setSuccess] = useState<boolean | null>(null);
+  const [completionError, setCompletionError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
 
@@ -65,6 +67,11 @@ export function useBuildLogs({ buildId, enabled = true }: UseSSEOptions) {
 
     // Build completion
     source.addEventListener('complete', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data) as { success?: boolean; error?: string; status?: string };
+        setSuccess(data.success ?? (data.status === 'success'));
+        setCompletionError(data.error ?? null);
+      } catch { /* ignore */ }
       setIsComplete(true);
       source.close();
     });
@@ -74,5 +81,5 @@ export function useBuildLogs({ buildId, enabled = true }: UseSSEOptions) {
     };
   }, [buildId, enabled]);
 
-  return { logs, phase, isComplete, isConnected };
+  return { logs, phase, isComplete, success, completionError, isConnected };
 }

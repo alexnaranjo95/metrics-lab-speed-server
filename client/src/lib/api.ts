@@ -57,6 +57,7 @@ export interface Build {
   lighthouseScoreBefore: number | null;
   lighthouseScoreAfter: number | null;
   errorMessage: string | null;
+  errorDetails?: { phase?: string; step?: string; message?: string; stack?: string } | null;
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
@@ -109,6 +110,10 @@ export const api = {
     }),
   cancelStaleBuilds: (siteId: string) =>
     fetchJson<{ cancelled: number; buildIds?: string[] }>(`/sites/${siteId}/builds/cancel-stale`, {
+      method: 'POST', body: '{}',
+    }),
+  retryBuild: (siteId: string, buildId: string) =>
+    fetchJson<{ message: string; buildId: string; status: string }>(`/sites/${siteId}/builds/${buildId}/retry`, {
       method: 'POST', body: '{}',
     }),
 
@@ -191,6 +196,8 @@ export const api = {
     fetchJson<{ hasWorkspace: boolean; edgeUrl: string | null; canEdit: boolean }>(
       `/sites/${siteId}/live-edit/status`
     ),
+  getLiveEditFiles: (siteId: string) =>
+    fetchJson<{ files: string[] }>(`/sites/${siteId}/live-edit/files`),
   getPreviewScreenshotUrl: (siteId: string, cacheBust?: number) => {
     const token = localStorage.getItem('apiKey') || '';
     const t = cacheBust ?? Date.now();
@@ -198,10 +205,10 @@ export const api = {
     if (token) params.set('token', token);
     return `${API_BASE}/sites/${siteId}/preview-screenshot?${params}`;
   },
-  liveEditChat: (siteId: string, message: string) =>
+  liveEditChat: (siteId: string, message: string, scope?: string[]) =>
     fetchJson<{ mode: string; planId?: string }>(`/sites/${siteId}/live-edit/chat`, {
       method: 'POST',
-      body: JSON.stringify({ message, mode: 'plan' }),
+      body: JSON.stringify({ message, mode: 'plan', scope }),
     }),
   liveEditExecute: (siteId: string, planId: string) =>
     fetchJson<{ applied: boolean; deployed: boolean; planId: string }>(

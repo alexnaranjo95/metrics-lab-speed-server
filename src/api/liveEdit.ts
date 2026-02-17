@@ -63,6 +63,20 @@ export const liveEditRoutes: FastifyPluginAsync = async (app) => {
     }
   );
 
+  // ─── GET /sites/:siteId/live-edit/files ──
+  app.get<{ Params: { siteId: string } }>(
+    '/sites/:siteId/live-edit/files',
+    { preHandler: [requireMasterKey] },
+    async (req, reply) => {
+      const { siteId } = req.params;
+      const ws = await hasWorkspace(siteId);
+      if (!ws) return reply.code(404).send({ error: 'No workspace. Run a build first.' });
+
+      const files = await getFileTree(siteId);
+      return reply.send({ files });
+    }
+  );
+
   // ─── GET /sites/:siteId/preview-screenshot ──
   app.get<{ Params: { siteId: string }; Querystring: { token?: string; t?: string } }>(
     '/sites/:siteId/preview-screenshot',
@@ -161,13 +175,13 @@ export const liveEditRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // ─── POST /sites/:siteId/live-edit/chat ──
-  app.post<{ Params: { siteId: string }; Body: { message?: string; mode?: 'plan' | 'execute'; planId?: string } }>(
+  app.post<{ Params: { siteId: string }; Body: { message?: string; mode?: 'plan' | 'execute'; planId?: string; scope?: string[] } }>(
     '/sites/:siteId/live-edit/chat',
     { preHandler: [requireMasterKey] },
     async (req, reply) => {
       const { siteId } = req.params;
-      const body = req.body as { message?: string; mode?: 'plan' | 'execute'; planId?: string };
-      const { message, mode = 'plan', planId } = body;
+      const body = req.body as { message?: string; mode?: 'plan' | 'execute'; planId?: string; scope?: string[] };
+      const { message, mode = 'plan', planId, scope } = body;
 
       if (!isLiveEditClaudeAvailable()) {
         return reply.code(400).send({ error: 'ANTHROPIC_API_KEY not configured' });
@@ -233,13 +247,17 @@ export const liveEditRoutes: FastifyPluginAsync = async (app) => {
 
       if (!message?.trim()) return reply.code(400).send({ error: 'message is required' });
 
-      const files = await getFileTree(siteId);
-      const htmlFiles = files.filter(f => f.endsWith('.html')).slice(0, 5);
-      let context = `Files: ${files.join(', ')}\n\n`;
-      for (const f of htmlFiles) {
+      const allFiles = await getFileTree(siteId);
+      const scopeSet = scope?.length ? new Set(scope) : null;
+      const relevantFiles = scopeSet ? allFiles.filter((f) => scopeSet.has(f)) : allFiles;
+      const htmlFiles = relevantFiles.filter((f) => f.endsWith('.html'));
+      const toLoad = htmlFiles.length > 0 ? htmlFiles.slice(0, 8) : relevantFiles.filter((f) => /\.(html|css|js)$/.test(f)).slice(0, 5);
+      let context = `Files in scope: ${toLoad.length ? toLoad.join(', ') : relevantFiles.slice(0, 20).join(', ')}${relevantFiles.length > 20 ? '...' : ''}\n\n`;
+      for (const f of toLoad) {
         const content = await readFileContent(siteId, f);
         if (content) context += `\n--- ${f} ---\n${content.slice(0, 8000)}\n`;
       }
+      if (scope?.length) context = `[Edit scope: ${scope.join(', ')}. Only modify these files.]\n\n` + context;
 
       const userContent = `Context:\n${context}\n\nUser request: ${message}`;
 
