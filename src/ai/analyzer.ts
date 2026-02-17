@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { config } from '../config.js';
 import type {
   SiteInventory, PageInventory, ScriptInventory, StylesheetInventory,
   ImageInventory, FontInventory, WordPressInfo, InteractiveElement,
@@ -8,6 +9,19 @@ import type {
 } from './types.js';
 
 const CHROME_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+const NAV_TIMEOUT_MS = config.AI_ANALYZER_NAV_TIMEOUT_MS;
+
+/** Enhance timeout errors with a helpful suggestion */
+function wrapNavError(err: unknown, url: string): Error {
+  const msg = (err as Error).message;
+  if (msg.includes('Timeout') && msg.includes('exceeded')) {
+    return new Error(
+      `${msg} The site may be slow, behind bot protection (Cloudflare/LiteSpeed), or blocking automated requests. Try increasing AI_ANALYZER_NAV_TIMEOUT_MS or check if the site is reachable from your build server.`
+    );
+  }
+  return err as Error;
+}
 
 const VIEWPORTS = [
   { name: 'desktop' as const, width: 1920, height: 1080, scale: 1 },
@@ -34,7 +48,11 @@ export async function analyzeSite(
 
     // ─── Discover pages ──────────────────────────────────
     const homepage = await context.newPage();
-    await homepage.goto(siteUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    try {
+      await homepage.goto(siteUrl, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+    } catch (err) {
+      throw wrapNavError(err, siteUrl);
+    }
     await homepage.waitForTimeout(3000);
 
     const discoveredLinks = await homepage.evaluate((baseUrl: string) => {
@@ -62,7 +80,7 @@ export async function analyzeSite(
     for (const pageUrl of pageUrls) {
       const page = await context.newPage();
       try {
-        await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
         await page.waitForTimeout(3000);
 
         const urlObj = new URL(pageUrl);
@@ -310,7 +328,7 @@ async function captureBaselineScreenshots(
           ignoreHTTPSErrors: true,
         });
         const page = await context.newPage();
-        await page.goto(pageInfo.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.goto(pageInfo.url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
         await page.waitForTimeout(3000);
         await page.waitForTimeout(2000);
 
@@ -380,7 +398,7 @@ async function recordBaselineBehavior(
     const page = await context.newPage();
     try {
       const pageUrl = new URL(pagePath, siteUrl).href;
-      await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
       await page.waitForTimeout(3000);
 
       for (const element of pageElements.slice(0, 10)) {

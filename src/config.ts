@@ -87,4 +87,7 @@ export const config = {
   MAX_PAGES_PER_SITE: intEnv('MAX_PAGES_PER_SITE', 500),
   MAX_CONCURRENT_BUILDS: intEnv('MAX_CONCURRENT_BUILDS', 2),
   BUILD_TIMEOUT_MINUTES: intEnv('BUILD_TIMEOUT_MINUTES', 30),
+
+  // AI agent: page navigation timeout (analyzer crawl) — default 90s for slow sites
+  AI_ANALYZER_NAV_TIMEOUT_MS: intEnv('AI_ANALYZER_NAV_TIMEOUT_MS', 90000),
 } as const;
