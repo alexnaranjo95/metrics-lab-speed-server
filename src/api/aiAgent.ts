@@ -1,7 +1,8 @@
+import fs from 'fs/promises';
 import type { FastifyPluginAsync } from 'fastify';
-import { eq } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { sites } from '../db/schema.js';
+import { sites, agentRuns } from '../db/schema.js';
 import { requireMasterKey } from '../middleware/auth.js';
 import { agentQueue } from '../queue/agentQueue.js';
 import { getAgentState, stopAgent } from '../ai/agent.js';
@@ -56,22 +57,104 @@ export const aiAgentRoutes: FastifyPluginAsync = async (app) => {
       const { siteId } = req.params;
       const state = getAgentState(siteId);
 
-      if (!state) {
-        return reply.send({ running: false, phase: null, iteration: 0, logs: [] });
+      if (state) {
+        let canResume = false;
+        let resumableRunId: string | undefined;
+        if (state.phase === 'failed') {
+          const [failedRun] = await db.select().from(agentRuns)
+            .where(and(eq(agentRuns.siteId, siteId), eq(agentRuns.runId, state.runId), eq(agentRuns.status, 'failed')))
+            .limit(1);
+          if (failedRun?.workDir) {
+            try {
+              await fs.access(failedRun.workDir);
+              canResume = true;
+              resumableRunId = state.runId;
+            } catch { /* workDir missing */ }
+          }
+        }
+        return reply.send({
+          running: state.phase !== 'complete' && state.phase !== 'failed',
+          runId: state.runId,
+          domain: state.domain,
+          startedAt: state.startedAt,
+          phase: state.phase,
+          iteration: state.iteration,
+          maxIterations: state.maxIterations,
+          phaseTimings: state.phaseTimings,
+          lastError: state.lastError,
+          logCount: state.logs.length,
+          recentLogs: state.logs.slice(-50),
+          currentBuildId: state.currentBuildId,
+          canResume,
+          resumableRunId,
+        });
+      }
+
+      const [failedRun] = await db.select().from(agentRuns)
+        .where(and(eq(agentRuns.siteId, siteId), eq(agentRuns.status, 'failed')))
+        .orderBy(desc(agentRuns.updatedAt))
+        .limit(1);
+
+      let canResume = false;
+      let resumableRunId: string | undefined;
+      if (failedRun?.workDir) {
+        try {
+          await fs.access(failedRun.workDir);
+          canResume = true;
+          resumableRunId = failedRun.runId;
+        } catch { /* workDir missing */ }
       }
 
       return reply.send({
-        running: state.phase !== 'complete' && state.phase !== 'failed',
-        runId: state.runId,
-        domain: state.domain,
-        startedAt: state.startedAt,
-        phase: state.phase,
-        iteration: state.iteration,
-        maxIterations: state.maxIterations,
-        phaseTimings: state.phaseTimings,
-        lastError: state.lastError,
-        logCount: state.logs.length,
-        recentLogs: state.logs.slice(-50),
+        running: false,
+        phase: 'failed',
+        iteration: 0,
+        logs: [],
+        recentLogs: (failedRun?.checkpoint as any)?.logs?.slice(-50) || [],
+        lastError: failedRun?.lastError,
+        canResume,
+        resumableRunId,
+      });
+    }
+  );
+
+  // ─── POST: Resume failed agent run ───────────────────────────────
+  app.post<{ Params: { siteId: string }; Body?: { runId?: string } }>(
+    '/sites/:siteId/ai/resume',
+    { preHandler: [requireMasterKey] },
+    async (req, reply) => {
+      const { siteId } = req.params;
+      const runId = req.body?.runId;
+
+      if (!isClaudeAvailable()) {
+        return reply.code(400).send({ error: 'ANTHROPIC_API_KEY not configured' });
+      }
+
+      const site = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
+      if (!site) return reply.code(404).send({ error: 'Site not found' });
+
+      const existing = getAgentState(siteId);
+      if (existing && existing.phase !== 'complete' && existing.phase !== 'failed') {
+        return reply.code(409).send({ error: 'Agent already running for this site' });
+      }
+
+      let targetRunId = runId;
+      if (!targetRunId) {
+        const [failedRun] = await db.select().from(agentRuns)
+          .where(and(eq(agentRuns.siteId, siteId), eq(agentRuns.status, 'failed')))
+          .orderBy(desc(agentRuns.updatedAt))
+          .limit(1);
+        if (!failedRun) return reply.code(404).send({ error: 'No resumable run found' });
+        targetRunId = failedRun.runId;
+      }
+
+      const job = await agentQueue.add('resume', { siteId, runId: targetRunId }, { jobId: `agent_resume_${siteId}_${Date.now()}` });
+
+      return reply.code(202).send({
+        message: 'AI optimization agent resume started',
+        jobId: job.id,
+        siteId,
+        runId: targetRunId,
       });
     }
   );

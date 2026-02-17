@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, type Build } from '@/lib/api';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
 import { cn, formatBytes, formatDate } from '@/lib/utils';
-import { Play, ExternalLink, CheckCircle, XCircle, Clock, Loader2, Settings, Eye, Bot, BarChart3 } from 'lucide-react';
+import { Play, ExternalLink, CheckCircle, XCircle, Clock, Loader2, Settings, Eye, Bot, BarChart3, RotateCcw } from 'lucide-react';
 
 export function SitePage() {
   const { siteId } = useParams<{ siteId: string }>();
@@ -24,6 +24,12 @@ export function SitePage() {
     queryFn: () => api.getBuilds(siteId!, 10),
     enabled: !!siteId && hasKey,
     refetchInterval: 10000,
+  });
+
+  const { data: agentStatus } = useQuery({
+    queryKey: ['agent-status', siteId],
+    queryFn: () => api.getAgentStatus(siteId!),
+    enabled: !!siteId && hasKey,
   });
 
   const triggerMutation = useMutation({
@@ -89,6 +95,23 @@ export function SitePage() {
             <BarChart3 className="h-4 w-4" />
             Performance
           </Link>
+          {agentStatus?.canResume ? (
+            <button
+              onClick={async () => {
+                try {
+                  await api.resumeAgent(siteId!, agentStatus.resumableRunId);
+                  navigate(`/sites/${siteId}/ai`);
+                  queryClient.invalidateQueries({ queryKey: ['agent-status', siteId] });
+                } catch (err: any) {
+                  alert(err.message);
+                }
+              }}
+              className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Resume Optimization
+            </button>
+          ) : null}
           <button
             onClick={async () => {
               try {

@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { ArrowLeft, Bot, Loader2, CheckCircle, XCircle, Square, Clock, AlertTriangle } from 'lucide-react';
+import { BuildViewer } from '@/components/build-viewer/BuildViewer';
+import { ArrowLeft, Bot, Loader2, CheckCircle, XCircle, Square, Clock, AlertTriangle, RotateCcw } from 'lucide-react';
 
 const PHASES = ['analyzing', 'planning', 'building', 'verifying', 'reviewing', 'complete'];
 
@@ -37,6 +38,7 @@ function formatPhaseDuration(timing: { start: string; end?: string } | undefined
 
 export function AgentPage() {
   const { siteId } = useParams<{ siteId: string }>();
+  const queryClient = useQueryClient();
   const [logs, setLogs] = useState<Array<{ timestamp: string; message: string }>>([]);
   const [phase, setPhase] = useState<string>('');
   const [iteration, setIteration] = useState(0);
@@ -46,6 +48,10 @@ export function AgentPage() {
   const [phaseTimings, setPhaseTimings] = useState<Record<string, { start: string; end?: string }>>({});
   const [lastError, setLastError] = useState<string | undefined>();
   const [elapsed, setElapsed] = useState<string>('0s');
+  const [currentBuildId, setCurrentBuildId] = useState<string | undefined>();
+  const [canResume, setCanResume] = useState(false);
+  const [resumableRunId, setResumableRunId] = useState<string | undefined>();
+  const [resumeLoading, setResumeLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Poll status
@@ -87,6 +93,9 @@ export function AgentPage() {
     if (status.startedAt) setStartedAt(status.startedAt);
     if (status.phaseTimings) setPhaseTimings(status.phaseTimings);
     if (status.lastError !== undefined) setLastError(status.lastError);
+    if (status.currentBuildId !== undefined) setCurrentBuildId(status.currentBuildId);
+    if (status.canResume !== undefined) setCanResume(status.canResume);
+    if (status.resumableRunId !== undefined) setResumableRunId(status.resumableRunId);
   }, [status]);
 
   // Elapsed timer (updates every second)
@@ -113,6 +122,23 @@ export function AgentPage() {
   const handleStop = async () => {
     if (!siteId) return;
     try { await api.stopAgent(siteId); } catch { /* ignore */ }
+  };
+
+  const handleResume = async () => {
+    if (!siteId || !canResume) return;
+    setResumeLoading(true);
+    try {
+      await api.resumeAgent(siteId, resumableRunId);
+      setIsComplete(false);
+      setPhase('');
+      setLogs([]);
+      setLastError(undefined);
+      queryClient.invalidateQueries({ queryKey: ['agent-status', siteId] });
+    } catch (err: any) {
+      alert(err?.message || 'Failed to resume');
+    } finally {
+      setResumeLoading(false);
+    }
   };
 
   const currentPhaseIdx = PHASES.indexOf(phase);
@@ -165,6 +191,16 @@ export function AgentPage() {
           <button onClick={handleStop} className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10 transition-colors">
             <Square className="h-3.5 w-3.5" />
             Stop Agent
+          </button>
+        )}
+        {isComplete && phase === 'failed' && canResume && (
+          <button
+            onClick={handleResume}
+            disabled={resumeLoading}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:opacity-90 disabled:opacity-50 transition-colors"
+          >
+            {resumeLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+            Resume
           </button>
         )}
       </div>
@@ -240,49 +276,59 @@ export function AgentPage() {
         </div>
       </div>
 
-      {/* Log viewer */}
-      <div className="rounded-lg border border-[hsl(var(--border))] bg-gray-950 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-800 bg-gray-900">
-          <div className="flex items-center gap-2">
-            <Bot className="h-4 w-4 text-purple-400" />
-            <span className="text-sm font-medium text-gray-300">Agent Logs</span>
+      {/* Screencast + Log viewer (side-by-side when building) or logs only */}
+      <div className={phase === 'building' && currentBuildId ? 'grid grid-cols-1 lg:grid-cols-2 gap-4' : ''}>
+        {phase === 'building' && currentBuildId && (
+          <BuildViewer buildId={currentBuildId} enabled={!isComplete} />
+        )}
+        <div className="rounded-lg border border-[hsl(var(--border))] bg-gray-950 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-gray-800 bg-gray-900">
+            <div className="flex items-center gap-2">
+              <Bot className="h-4 w-4 text-purple-400" />
+              <span className="text-sm font-medium text-gray-300">Agent Logs</span>
+            </div>
+            <span className="text-xs text-gray-500">{logs.length} entries</span>
           </div>
-          <span className="text-xs text-gray-500">{logs.length} entries</span>
-        </div>
-        <div className="h-[500px] overflow-y-auto p-3 font-mono text-xs leading-relaxed">
-          {logs.length === 0 && !isComplete && (
-            <div className="text-gray-600 animate-pulse">Waiting for agent to start...</div>
-          )}
-          {logs.map((log, i) => {
-            const time = new Date(log.timestamp).toLocaleTimeString('en-US', { hour12: false });
-            const isSettings = log.message.includes('[settings]');
-            const isError = log.message.toLowerCase().includes('fail') || log.message.toLowerCase().includes('error');
-            const isSuccess = log.message.includes('PASS') || log.message.includes('COMPLETE') || log.message.includes('pass');
-            const isHeader = log.message.startsWith('═') || log.message.startsWith('PHASE') || log.message.startsWith('  ITERATION');
+          <div className="h-[500px] overflow-y-auto p-3 font-mono text-xs leading-relaxed">
+            {logs.length === 0 && !isComplete && (
+              <div className="text-gray-600 animate-pulse">Waiting for agent to start...</div>
+            )}
+            {logs.map((log, i) => {
+              const time = new Date(log.timestamp).toLocaleTimeString('en-US', { hour12: false });
+              const isSettings = log.message.includes('[settings]');
+              const isError = log.message.toLowerCase().includes('fail') || log.message.toLowerCase().includes('error');
+              const isSuccess = log.message.includes('PASS') || log.message.includes('COMPLETE') || log.message.includes('pass');
+              const isHeader = log.message.startsWith('═') || log.message.startsWith('PHASE') || log.message.startsWith('  ITERATION');
 
-            return (
-              <div key={i} className={cn(
-                'py-0.5',
-                isHeader ? 'text-purple-400 font-bold mt-2' :
-                isSettings ? 'text-cyan-400' :
-                isError ? 'text-red-400' :
-                isSuccess ? 'text-green-400' :
-                'text-gray-300'
-              )}>
-                <span className="text-gray-600 mr-2">{time}</span>
-                {log.message}
-              </div>
-            );
-          })}
-          <div ref={bottomRef} />
+              return (
+                <div key={i} className={cn(
+                  'py-0.5',
+                  isHeader ? 'text-purple-400 font-bold mt-2' :
+                  isSettings ? 'text-cyan-400' :
+                  isError ? 'text-red-400' :
+                  isSuccess ? 'text-green-400' :
+                  'text-gray-300'
+                )}>
+                  <span className="text-gray-600 mr-2">{time}</span>
+                  {log.message}
+                </div>
+              );
+            })}
+            <div ref={bottomRef} />
+          </div>
         </div>
       </div>
 
       {/* Failed state with error */}
-      {phase === 'failed' && lastError && (
+      {phase === 'failed' && (
         <div className="rounded-lg border border-[hsl(var(--destructive))]/30 bg-[hsl(var(--destructive))]/5 p-4">
           <h3 className="text-sm font-semibold text-[hsl(var(--destructive))] mb-1">Agent Failed</h3>
-          <p className="text-sm text-[hsl(var(--destructive))]">{lastError}</p>
+          {lastError && <p className="text-sm text-[hsl(var(--destructive))] mb-2">{lastError}</p>}
+          {canResume && (
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">
+              Optimization failed. You can resume from where it stopped.
+            </p>
+          )}
         </div>
       )}
     </div>

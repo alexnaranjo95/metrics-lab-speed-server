@@ -172,7 +172,15 @@ export const api = {
       lastError?: string;
       logCount?: number;
       recentLogs?: Array<{ timestamp: string; message: string }>;
+      currentBuildId?: string;
+      canResume?: boolean;
+      resumableRunId?: string;
     }>(`/sites/${siteId}/ai/status`),
+  resumeAgent: (siteId: string, runId?: string) =>
+    fetchJson<{ message: string; jobId: string; siteId: string; runId: string }>(
+      `/sites/${siteId}/ai/resume`,
+      { method: 'POST', body: JSON.stringify(runId ? { runId } : {}) }
+    ),
   getAgentReport: (siteId: string) =>
     fetchJson<{ report: any }>(`/sites/${siteId}/ai/report`),
   stopAgent: (siteId: string) =>

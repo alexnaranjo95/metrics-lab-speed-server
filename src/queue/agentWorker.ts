@@ -1,14 +1,19 @@
 import { Worker } from 'bullmq';
 import { redisConnectionOptions } from './connection.js';
-import { runOptimizationAgent } from '../ai/agent.js';
+import { runOptimizationAgent, resumeOptimizationAgent } from '../ai/agent.js';
 import type { AgentJobData } from './agentQueue.js';
 
 export const agentWorker = new Worker<AgentJobData>(
   'ai-agent',
   async (job) => {
-    const { siteId } = job.data;
-    console.log(`[ai-agent] Starting optimization agent for site ${siteId}`);
-    await runOptimizationAgent(siteId);
+    const { siteId, runId } = job.data;
+    if (runId) {
+      console.log(`[ai-agent] Resuming optimization agent for site ${siteId}, run ${runId}`);
+      await resumeOptimizationAgent(siteId, runId);
+    } else {
+      console.log(`[ai-agent] Starting optimization agent for site ${siteId}`);
+      await runOptimizationAgent(siteId);
+    }
   },
   {
     connection: redisConnectionOptions,

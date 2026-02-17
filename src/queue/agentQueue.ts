@@ -3,6 +3,7 @@ import { redisConnectionOptions } from './connection.js';
 
 export interface AgentJobData {
   siteId: string;
+  runId?: string;
 }
 
 export const agentQueue = new Queue<AgentJobData>('ai-agent', {

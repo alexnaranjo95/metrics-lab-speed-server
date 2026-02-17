@@ -450,6 +450,36 @@ export const aiOptimizationSessions = pgTable('ai_optimization_sessions', {
   sessionTypeIdx: index('ai_opt_sessions_type_idx').on(table.sessionType),
 }));
 
+// ─── Agent Runs (resumable checkpoints) ─────────────────────────────
+
+export const agentRuns = pgTable('agent_runs', {
+  id: text('id').primaryKey(),
+  siteId: text('site_id').notNull().references(() => sites.id, { onDelete: 'cascade' }),
+  runId: text('run_id').notNull().unique(),
+  status: text('status').notNull().default('running'), // 'running' | 'failed' | 'completed' | 'aborted'
+  phase: text('phase').notNull().default('analyzing'),
+  iteration: integer('iteration').notNull().default(0),
+  workDir: text('work_dir').notNull(),
+  checkpoint: jsonb('checkpoint').$type<{
+    inventory?: unknown;
+    plan?: unknown;
+    pageSpeedData?: unknown;
+    currentSettings?: Record<string, unknown>;
+    iterationHistory?: unknown[];
+    phaseTimings?: Record<string, { start: string; end?: string }>;
+    logs?: Array<{ timestamp: string; message: string }>;
+    lastCompletedPhase?: string;
+  }>(),
+  lastError: text('last_error'),
+  startedAt: timestamp('started_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  siteIdIdx: index('agent_runs_site_id_idx').on(table.siteId),
+  statusIdx: index('agent_runs_status_idx').on(table.status),
+  runIdIdx: index('agent_runs_run_id_idx').on(table.runId),
+  siteStatusIdx: index('agent_runs_site_status_idx').on(table.siteId, table.status),
+}));
+
 // ─── AI Knowledge Base and Learning Tables ────────────────────────
 export const optimizationKnowledgeBase = pgTable('optimization_knowledge_base', {
   id: text('id').primaryKey(),
@@ -631,6 +661,7 @@ export const sitesRelations = relations(sites, ({ many }) => ({
   seoOptimizationHistory: many(seoOptimizationHistory),
   securityHeadersHistory: many(securityHeadersHistory),
   aiOptimizationSessions: many(aiOptimizationSessions),
+  agentRuns: many(agentRuns),
 }));
 
 export const buildsRelations = relations(builds, ({ one }) => ({
@@ -693,6 +724,10 @@ export const aiOptimizationSessionsRelations = relations(aiOptimizationSessions,
   site: one(sites, { fields: [aiOptimizationSessions.siteId], references: [sites.id] }),
 }));
 
+export const agentRunsRelations = relations(agentRuns, ({ one }) => ({
+  site: one(sites, { fields: [agentRuns.siteId], references: [sites.id] }),
+}));
+
 // Type exports
 export type Site = typeof sites.$inferSelect;
 export type NewSite = typeof sites.$inferInsert;
@@ -720,6 +755,8 @@ export type SecurityHeadersHistoryEntry = typeof securityHeadersHistory.$inferSe
 export type NewSecurityHeadersHistoryEntry = typeof securityHeadersHistory.$inferInsert;
 export type AIOptimizationSession = typeof aiOptimizationSessions.$inferSelect;
 export type NewAIOptimizationSession = typeof aiOptimizationSessions.$inferInsert;
+export type AgentRun = typeof agentRuns.$inferSelect;
+export type NewAgentRun = typeof agentRuns.$inferInsert;
 
 // AI Learning and Knowledge Base types
 export type OptimizationKnowledge = typeof optimizationKnowledgeBase.$inferSelect;
