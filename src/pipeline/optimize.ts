@@ -317,6 +317,29 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
         }
       }
 
+      // Remove scripts matching custom patterns
+      const customPatterns = (settings.js as any)?.customRemovePatterns ?? [] as string[];
+      if (customPatterns.length > 0) {
+        $scan('script[src]').each((_, el) => {
+          const src = $scan(el).attr('src') || '';
+          const match = customPatterns.some((p: string) => {
+            if (typeof p !== 'string' || !p) return false;
+            try {
+              if (p.startsWith('/') && p.endsWith('/')) {
+                return new RegExp(p.slice(1, -1)).test(src);
+              }
+              return src.includes(p) || src.toLowerCase().includes(p.toLowerCase());
+            } catch {
+              return src.includes(p);
+            }
+          });
+          if (match) {
+            $scan(el).remove();
+            console.log(`[optimize] Removed script matching custom pattern: ${src}`);
+          }
+        });
+      }
+
       // Inject Zaraz placeholder
       const zarazResult = injectZarazPlaceholder($scan, thirdPartyReport);
       if (zarazResult.injected && i === 0) {
@@ -429,7 +452,7 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
 
     // 4k. Resource hints (LCP preload, preconnect, cleanup)
     try {
-      html = injectResourceHints(html);
+      html = injectResourceHints(html, settings);
     } catch (err) {
       emit('html', 'warn', `Resource hints injection failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
       console.error(`[optimize] Resource hints injection failed for ${page.path}:`, (err as Error).message);
@@ -467,26 +490,32 @@ export async function optimizeAll(options: OptimizeOptions): Promise<OptimizeRes
       }
     }
 
-    // 4l-pre1. Critical CSS extraction (Playwright coverage)
-    try {
-      const critResult = await extractCritical(html, (msg) => {
-        if (i === 0 && buildId) emit('css', 'info', msg);
-      });
-      if (critResult.criticalCss) {
-        const $crit = cheerio.load(html);
-        const cssFilePaths = $crit('link[rel="stylesheet"]').toArray()
-          .map(el => $crit(el).attr('href') || '')
-          .filter(Boolean);
-        injectCriticalCss($crit, critResult.criticalCss, cssFilePaths);
-        html = $crit.html();
-        if (i === 0) {
-          emit('css', 'info', `Critical CSS: ${critResult.criticalSizeKb.toFixed(1)}KB inlined`);
-          console.log(`[optimize] Critical CSS: ${critResult.criticalSizeKb.toFixed(1)}KB`);
+    // 4l-pre1. Critical CSS extraction (Playwright coverage) — only when css.critical
+    if (settings.css.enabled && settings.css.critical !== false) {
+      try {
+        const critResult = await extractCritical(html, (msg) => {
+          if (i === 0 && buildId) emit('css', 'info', msg);
+        }, {
+          criticalDimensions: settings.css.criticalDimensions,
+          criticalForMobile: settings.css.criticalForMobile,
+        });
+        if (critResult.criticalCss) {
+          const $crit = cheerio.load(html);
+          const cssFilePaths = $crit('link[rel="stylesheet"]').toArray()
+            .map(el => $crit(el).attr('href') || '')
+            .filter(Boolean);
+          injectCriticalCss($crit, critResult.criticalCss, cssFilePaths);
+          html = $crit.html();
+          if (i === 0) {
+            emit('css', 'info', `Critical CSS: ${critResult.criticalSizeKb.toFixed(1)}KB inlined`);
+            console.log(`[optimize] Critical CSS: ${critResult.criticalSizeKb.toFixed(1)}KB`);
+          }
         }
+      } catch (err) {
+        emit('css', 'warn', `Critical CSS extraction failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
+        console.error(`[optimize] Critical CSS extraction failed for ${page.path}:`, (err as Error).message);
+        try { html = makeStylesheetsAsync(html); } catch { /* fallback: ensure CSS is deferred */ }
       }
-    } catch (err) {
-      emit('css', 'warn', `Critical CSS extraction failed for ${page.path}: ${(err as Error).message}`, { pageUrl: page.path });
-      console.error(`[optimize] Critical CSS extraction failed for ${page.path}:`, (err as Error).message);
     }
 
     // 4l-pre2. SVG sprite deduplication

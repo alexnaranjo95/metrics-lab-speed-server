@@ -223,6 +223,13 @@ export async function runBuildPipeline(
         existingPages: existingPages.map(p => ({ path: p.path, contentHash: p.contentHash ?? '' })),
         targetPages,
         buildId,
+        crawlWaitMs: resolvedSettings?.build?.crawlWaitMs,
+        maxPages: resolvedSettings?.build?.maxPages,
+        excludePatterns: resolvedSettings?.build?.excludePatterns,
+        pageLoadTimeout: resolvedSettings?.build?.pageLoadTimeout,
+        maxRetries: resolvedSettings?.build?.maxRetries,
+        retryBackoffMs: resolvedSettings?.build?.retryBackoffMs,
+        maxConcurrentPages: resolvedSettings?.build?.maxConcurrentPages,
       });
 
       await saveCheckpoint(workDir, serializeCheckpoint(crawlResult, site.siteUrl, scope));

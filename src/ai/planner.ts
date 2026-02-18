@@ -36,7 +36,8 @@ export interface EnhancedOptimizationPlan extends OptimizationPlan {
 export async function generateOptimizationPlan(
   inventory: SiteInventory,
   log: (msg: string) => void,
-  pageSpeedData?: OptimizationWorkflow | null
+  pageSpeedData?: OptimizationWorkflow | null,
+  currentSettings?: Record<string, any> | null
 ): Promise<EnhancedOptimizationPlan> {
   // Analyze PageSpeed audits for intelligent prioritization
   const auditAnalysis = pageSpeedData ? analyzePageSpeedAudits(pageSpeedData) : null;
@@ -93,6 +94,11 @@ ${pageSpeedSection}
 
 PAGES WITH FEATURES:
 ${inventory.pages.map(p => `- ${p.path}: slider=${p.hasSlider}, accordion=${p.hasAccordion}, tabs=${p.hasTabs}, modal=${p.hasModal}, dropdown=${p.hasDropdownMenu}, form=${p.hasForm}, video=${p.hasVideo}`).join('\n')}
+${currentSettings && Object.keys(currentSettings).length > 0 ? `
+CURRENT SITE SETTINGS (preserve user overrides, suggest only changes needed for optimization):
+${JSON.stringify(currentSettings, null, 2)}
+
+When suggesting settings, MERGE with the above. Preserve sections the user has configured (e.g. cache durations, build scope) unless they conflict with optimization. Focus your suggestions on performance-impacting changes (images, css, js, cls, seo).` : ''}
 
 Generate the complete optimization settings with full reasoning.`;
 

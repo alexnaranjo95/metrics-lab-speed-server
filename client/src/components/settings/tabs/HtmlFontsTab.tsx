@@ -146,8 +146,30 @@ export function HtmlFontsTab({ settings, defaults, diff, onChange }: Props) {
             onChange={(v) => onChange('fonts', { fontDisplay: v })}
           />
         </SettingField>
-        <SettingField label="Smart Subsetting" description="Analyze crawled pages to subset fonts to used characters only" isOverridden={diff?.fonts?.subsetting}>
+        <SettingField label="Smart Subsetting" description="Add subset param to Google Fonts URL (e.g. latin, latin-ext)" isOverridden={diff?.fonts?.subsetting}>
           <Toggle checked={settings.fonts.subsetting} onChange={(v) => onChange('fonts', { subsetting: v })} />
+        </SettingField>
+        {settings.fonts.subsetting && (
+          <SettingField label="Subsets" description="Comma-separated: latin, latin-ext, cyrillic, greek, vietnamese" isOverridden={diff?.fonts?.subsets}>
+            <input
+              type="text"
+              value={Array.isArray(settings.fonts.subsets) ? settings.fonts.subsets.join(', ') : (settings.fonts.subsets || 'latin')}
+              onChange={(e) => onChange('fonts', { subsets: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+              placeholder="latin, latin-ext"
+              className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+            />
+          </SettingField>
+        )}
+        <SettingField label="Format Preference" description="woff2 (smallest), woff (legacy), or both" isOverridden={diff?.fonts?.formatPreference}>
+          <Select
+            value={settings.fonts.formatPreference ?? 'woff2'}
+            options={[
+              { value: 'woff2', label: 'woff2' },
+              { value: 'woff', label: 'woff' },
+              { value: 'both', label: 'both' },
+            ]}
+            onChange={(v) => onChange('fonts', { formatPreference: v })}
+          />
         </SettingField>
       </SettingCard>
     </div>

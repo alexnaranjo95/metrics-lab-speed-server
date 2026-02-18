@@ -5,6 +5,7 @@ import { db } from '../db/index.js';
 import { sites, builds } from '../db/schema.js';
 import { requireMasterKey } from '../middleware/auth.js';
 import { buildQueue } from '../queue/buildQueue.js';
+import { getCachedResolvedSettings } from '../shared/settingsMerge.js';
 
 export async function buildRoutes(app: FastifyInstance) {
   // All build routes require master key
@@ -18,9 +19,6 @@ export async function buildRoutes(app: FastifyInstance) {
       pages?: string[];
     } | null;
 
-    const scope = body?.scope ?? 'full';
-    const targetPages = body?.pages;
-
     // Verify site exists and is active
     const site = await db.query.sites.findFirst({
       where: eq(sites.id, siteId),
@@ -32,6 +30,33 @@ export async function buildRoutes(app: FastifyInstance) {
 
     if (site.status !== 'active') {
       return reply.status(400).send({ error: `Site is ${site.status}, cannot trigger build` });
+    }
+
+    // Determine scope and targetPages: body overrides take precedence, else use build settings
+    let scope: 'full' | 'partial';
+    let targetPages: string[] | undefined;
+
+    if (body?.scope !== undefined || body?.pages !== undefined) {
+      scope = body?.scope ?? 'full';
+      targetPages = body?.pages;
+    } else {
+      const resolved = await getCachedResolvedSettings(siteId, site.settings as any);
+      const buildSettings = resolved?.build;
+      const buildScope = buildSettings?.scope ?? 'full';
+
+      if (buildScope === 'custom' && (buildSettings?.customUrls?.length ?? 0) > 0) {
+        scope = 'partial';
+        targetPages = (buildSettings.customUrls as string[]).map((u) =>
+          u.startsWith('http') ? u : `${site.siteUrl.replace(/\/$/, '')}${u.startsWith('/') ? u : `/${u}`}`
+        );
+      } else if (buildScope === 'homepage') {
+        scope = 'partial';
+        const base = site.siteUrl.replace(/\/$/, '');
+        targetPages = [`${base}/`];
+      } else {
+        scope = 'full';
+        targetPages = undefined;
+      }
     }
 
     // Check no build is currently in progress

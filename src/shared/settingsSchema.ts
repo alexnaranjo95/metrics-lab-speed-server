@@ -3,14 +3,14 @@ import { z } from 'zod';
 // ─── Image Settings ───────────────────────────────────────────────
 
 const webpSettingsSchema = z.object({
-  quality: z.number().min(1).max(100).default(80),
+  quality: z.number().min(1).max(100).default(75),
   effort: z.number().min(0).max(6).default(4),
   lossless: z.boolean().default(false),
   preset: z.enum(['default', 'photo', 'picture', 'drawing', 'icon', 'text']).default('default'),
 });
 
 const avifSettingsSchema = z.object({
-  quality: z.number().min(1).max(100).default(50),
+  quality: z.number().min(1).max(100).default(45),
   effort: z.number().min(0).max(9).default(4),
   chromaSubsampling: z.enum(['4:2:0', '4:4:4']).default('4:4:4'),
   lossless: z.boolean().default(false),
@@ -35,7 +35,7 @@ const qualityTiersSchema = z.object({
     quality: 88, lazyLoad: false, fetchPriority: 'high', urlPatterns: [], cssSelectors: [],
   }),
   standard: qualityTierSchema.default({
-    quality: 78, lazyLoad: true, fetchPriority: 'auto', urlPatterns: [], cssSelectors: [],
+    quality: 75, lazyLoad: true, fetchPriority: 'auto', urlPatterns: [], cssSelectors: [],
   }),
   thumbnail: qualityTierSchema.default({
     quality: 65, lazyLoad: true, fetchPriority: 'low', urlPatterns: [], cssSelectors: [],
@@ -44,8 +44,8 @@ const qualityTiersSchema = z.object({
 
 const imageSettingsSchema = z.object({
   enabled: z.boolean().default(true),
-  webp: webpSettingsSchema.default({ quality: 80, effort: 4, lossless: false, preset: 'default' }),
-  avif: avifSettingsSchema.default({ quality: 50, effort: 4, chromaSubsampling: '4:4:4', lossless: false }),
+  webp: webpSettingsSchema.default({ quality: 75, effort: 4, lossless: false, preset: 'default' }),
+  avif: avifSettingsSchema.default({ quality: 45, effort: 4, chromaSubsampling: '4:4:4', lossless: false }),
   jpeg: jpegSettingsSchema.default({ quality: 80, mozjpeg: true, progressive: true }),
   format: z.enum(['webp', 'avif', 'auto']).default('auto'),
   convertToWebp: z.boolean().default(true),
@@ -64,7 +64,7 @@ const imageSettingsSchema = z.object({
   lcpImageFetchPriority: z.boolean().default(true),
   qualityTiers: qualityTiersSchema.default({
     hero: { quality: 88, lazyLoad: false, fetchPriority: 'high', urlPatterns: [], cssSelectors: [] },
-    standard: { quality: 78, lazyLoad: true, fetchPriority: 'auto', urlPatterns: [], cssSelectors: [] },
+    standard: { quality: 75, lazyLoad: true, fetchPriority: 'auto', urlPatterns: [], cssSelectors: [] },
     thumbnail: { quality: 65, lazyLoad: true, fetchPriority: 'low', urlPatterns: [], cssSelectors: [] },
   }),
 });
@@ -142,7 +142,7 @@ const purgeSafelistSchema = z.object({
 const cssSettingsSchema = z.object({
   enabled: z.boolean().default(true),
   purge: z.boolean().default(true),
-  purgeAggressiveness: z.enum(['safe', 'moderate', 'aggressive']).default('safe'),
+  purgeAggressiveness: z.enum(['safe', 'moderate', 'aggressive']).default('moderate'),
   purgeSafelist: purgeSafelistSchema.default({
     standard: ['active', 'open', 'visible', 'show', 'hide', 'collapsed', 'hidden', 'current-menu-item'],
     deep: ['/^wp-/', '/^is-/', '/^has-/', '/^alignwide/', '/^alignfull/', '/^gallery/', '/^swiper-/', '/^slick-/', '/^woocommerce/'],
@@ -363,6 +363,7 @@ const buildSettingsSchema = z.object({
   maxPages: z.number().min(1).max(500).default(100),
   pageLoadTimeout: z.number().min(10).max(120).default(30),
   networkIdleTimeout: z.number().min(1).max(30).default(5),
+  crawlWaitMs: z.number().min(1000).max(30000).optional(),
   maxRetries: z.number().min(0).max(10).default(3),
   retryBackoffMs: z.number().default(5000),
   maxConcurrentPages: z.number().min(1).max(10).default(3),
@@ -463,8 +464,8 @@ const securitySettingsSchema = z.object({
 export const settingsSchema = z.object({
   images: imageSettingsSchema.default({
     enabled: true,
-    webp: { quality: 80, effort: 4, lossless: false, preset: 'default' },
-    avif: { quality: 50, effort: 4, chromaSubsampling: '4:4:4', lossless: false },
+    webp: { quality: 75, effort: 4, lossless: false, preset: 'default' },
+    avif: { quality: 45, effort: 4, chromaSubsampling: '4:4:4', lossless: false },
     jpeg: { quality: 80, mozjpeg: true, progressive: true },
     format: 'auto', convertToWebp: true, convertToAvif: false, keepOriginalAsFallback: true,
     breakpoints: [320, 640, 768, 1024, 1280, 1920],
@@ -473,7 +474,7 @@ export const settingsSchema = z.object({
     lcpDetection: 'auto', lcpImageFetchPriority: true,
     qualityTiers: {
       hero: { quality: 88, lazyLoad: false, fetchPriority: 'high', urlPatterns: [], cssSelectors: [] },
-      standard: { quality: 78, lazyLoad: true, fetchPriority: 'auto', urlPatterns: [], cssSelectors: [] },
+      standard: { quality: 75, lazyLoad: true, fetchPriority: 'auto', urlPatterns: [], cssSelectors: [] },
       thumbnail: { quality: 65, lazyLoad: true, fetchPriority: 'low', urlPatterns: [], cssSelectors: [] },
     },
   }),
@@ -497,7 +498,7 @@ export const settingsSchema = z.object({
     migrateFavicons: true, migrateBackgrounds: true,
   }),
   css: cssSettingsSchema.default({
-    enabled: true, purge: true, purgeAggressiveness: 'safe', purgeSafelist: {
+    enabled: true, purge: true, purgeAggressiveness: 'moderate', purgeSafelist: {
       standard: ['active', 'open', 'visible', 'show', 'hide', 'collapsed', 'hidden', 'current-menu-item'],
       deep: ['/^wp-/', '/^is-/', '/^has-/', '/^alignwide/', '/^alignfull/', '/^gallery/', '/^swiper-/', '/^slick-/', '/^woocommerce/'],
       greedy: ['/modal/', '/dropdown/', '/tooltip/', '/popover/', '/carousel/', '/slider/', '/swiper/'],

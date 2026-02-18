@@ -36,6 +36,10 @@ export async function optimizeCLS(
     fontDisplayStrategy: 'optional' as const,
     dynamicContentReservation: true,
     enableLayoutContainment: true,
+    addResponsiveCSS: true,
+    preventFontLoaderShifts: true,
+    reserveAdSpace: true,
+    cookieBannerOptimization: true,
   };
 
   // Phase 1: Image dimension injection (highest CLS impact ~60%)
@@ -46,13 +50,16 @@ export async function optimizeCLS(
 
   // Phase 2: Font display optimization (prevents FOUT/FOIT shifts)
   if (clsSettings.fontDisplayStrategy) {
-    result.fontsOptimized = optimizeFontDisplay($, clsSettings.fontDisplayStrategy);
+    result.fontsOptimized = optimizeFontDisplay($, clsSettings.fontDisplayStrategy, clsSettings.preventFontLoaderShifts !== false);
     result.estimatedCLSImprovement += result.fontsOptimized * 0.08; // ~0.08 CLS per font
   }
 
   // Phase 3: Dynamic content reservation (ads, embeds, late-loading content)
   if (clsSettings.dynamicContentReservation) {
-    result.dynamicContentContainersReserved = reserveDynamicContentSpace($);
+    result.dynamicContentContainersReserved = reserveDynamicContentSpace($, {
+      reserveAdSpace: clsSettings.reserveAdSpace !== false,
+      cookieBannerOptimization: clsSettings.cookieBannerOptimization !== false,
+    });
     result.estimatedCLSImprovement += result.dynamicContentContainersReserved * 0.12;
   }
 
@@ -62,8 +69,10 @@ export async function optimizeCLS(
     result.estimatedCLSImprovement += result.layoutContainmentApplied * 0.05;
   }
 
-  // Phase 5: Responsive image aspect ratio preservation
-  addResponsiveImageCSS($);
+  // Phase 5: Responsive image aspect ratio preservation (when enabled)
+  if (clsSettings.addResponsiveCSS !== false) {
+    addResponsiveImageCSS($);
+  }
 
   return { html: $.html(), result };
 }
@@ -89,13 +98,16 @@ async function injectImageDimensionsAdvanced(
     const hasHeight = $img.attr('height') || $img.css('height');
     if (hasWidth && hasHeight) continue;
 
-    // Resolve image path
-    const imagePath = src.startsWith('/') 
-      ? path.join(workDir, src)
-      : path.resolve(workDir, src);
+    // Resolve image path (assets live at workDir/assets/)
+    const srcNormalized = src.startsWith('/') ? src.slice(1) : src;
+    let imagePath = path.join(workDir, srcNormalized);
 
     try {
-      const dimensions = await getImageDimensions(imagePath);
+      let dimensions = await getImageDimensions(imagePath);
+      if (!dimensions && path.basename(srcNormalized) !== srcNormalized) {
+        const fallbackPath = path.join(workDir, 'assets', path.basename(srcNormalized));
+        dimensions = await getImageDimensions(fallbackPath);
+      }
       if (dimensions) {
         // Add width/height attributes for aspect ratio calculation
         if (!hasWidth) $img.attr('width', dimensions.width.toString());
@@ -117,11 +129,13 @@ async function injectImageDimensionsAdvanced(
 
 /**
  * Font display optimization to prevent FOUT/FOIT layout shifts
- * Implements zero-CLS font loading strategies
+ * Implements zero-CLS font loading strategies.
+ * preventFontLoaderShifts: when true, adds size-adjust/ascent-override to fallback fonts.
  */
 function optimizeFontDisplay(
-  $: cheerio.CheerioAPI, 
-  strategy: 'optional' | 'swap' | 'fallback' | 'block'
+  $: cheerio.CheerioAPI,
+  strategy: 'optional' | 'swap' | 'fallback' | 'block',
+  preventFontLoaderShifts: boolean
 ): number {
   const displayValue = strategy === 'block' ? 'block' : strategy;
   let optimized = 0;
@@ -159,11 +173,10 @@ function optimizeFontDisplay(
     $style.html(css);
   });
 
-  // Add preload hints for critical fonts (reduces FOUT)
-  if (displayValue === 'swap' || displayValue === 'fallback') {
+  // Add font metric overrides for fallback fonts (prevents layout shift during swap)
+  if (preventFontLoaderShifts && (displayValue === 'swap' || displayValue === 'fallback')) {
     const head = $('head');
     if (head.length) {
-      // Add font metric override for system font fallback matching
       head.append(`
         <style>
           /* Font metric overrides for reduced CLS during font swap */
@@ -183,11 +196,17 @@ function optimizeFontDisplay(
   return optimized;
 }
 
+interface ReserveOptions {
+  reserveAdSpace?: boolean;
+  cookieBannerOptimization?: boolean;
+}
+
 /**
  * Reserve space for dynamic content that loads after initial render
  * Prevents layout shifts from ads, embeds, widgets, etc.
  */
-function reserveDynamicContentSpace($: cheerio.CheerioAPI): number {
+function reserveDynamicContentSpace($: cheerio.CheerioAPI, options?: ReserveOptions): number {
+  const { reserveAdSpace = true, cookieBannerOptimization = true } = options ?? {};
   let reserved = 0;
 
   // Video embeds (YouTube, Vimeo, etc.)
@@ -226,18 +245,18 @@ function reserveDynamicContentSpace($: cheerio.CheerioAPI): number {
     }
   });
 
-  // Ad containers (common ad slot patterns)
-  const adSelectors = [
-    '[class*="ad-"]',
-    '[class*="ads-"]',
-    '[id*="ad-"]',
-    '[id*="ads-"]',
-    '.advertisement',
-    '.google-ad',
-    '.adsense',
-  ];
-
-  adSelectors.forEach(selector => {
+  // Ad containers (common ad slot patterns) — gated by reserveAdSpace
+  if (reserveAdSpace) {
+    const adSelectors = [
+      '[class*="ad-"]',
+      '[class*="ads-"]',
+      '[id*="ad-"]',
+      '[id*="ads-"]',
+      '.advertisement',
+      '.google-ad',
+      '.adsense',
+    ];
+    adSelectors.forEach(selector => {
     $(selector).each((_, element) => {
       const $el = $(element);
       if (!$el.css('min-height') && !$el.attr('style')?.includes('height')) {
@@ -246,10 +265,12 @@ function reserveDynamicContentSpace($: cheerio.CheerioAPI): number {
         reserved++;
       }
     });
-  });
+    });
+  }
 
-  // Cookie banners and popups - use transforms to prevent CLS
-  const popupSelectors = [
+  // Cookie banners and popups — gated by cookieBannerOptimization
+  if (cookieBannerOptimization) {
+    const popupSelectors = [
     '[class*="cookie"]',
     '[class*="consent"]',
     '[class*="popup"]',
@@ -257,20 +278,20 @@ function reserveDynamicContentSpace($: cheerio.CheerioAPI): number {
     '[class*="banner"]',
   ];
 
-  popupSelectors.forEach(selector => {
-    $(selector).each((_, element) => {
-      const $el = $(element);
-      // Use transform instead of changing position to prevent layout shifts
-      if (!$el.css('position')) {
-        $el.css({
-          'position': 'fixed',
-          'transform': 'translateZ(0)', // Force GPU layer
-          'will-change': 'transform',
-        });
-        reserved++;
-      }
+    popupSelectors.forEach(selector => {
+      $(selector).each((_, element) => {
+        const $el = $(element);
+        if (!$el.css('position')) {
+          $el.css({
+            'position': 'fixed',
+            'transform': 'translateZ(0)',
+            'will-change': 'transform',
+          });
+          reserved++;
+        }
+      });
     });
-  });
+  }
 
   return reserved;
 }

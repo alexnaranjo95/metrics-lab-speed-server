@@ -10,14 +10,35 @@ import { chromium } from 'playwright';
 import http from 'http';
 import type { CheerioAPI } from 'cheerio';
 
-const MAX_CRITICAL_CSS_KB = 15;
-const VIEWPORT_WIDTH = 1280;
-const VIEWPORT_HEIGHT = 720;
+const MAX_CRITICAL_CSS_KB = 20;
+const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
+const MOBILE_VIEWPORT = { width: 320, height: 480 };
+
+export interface CriticalCssExtractOptions {
+  criticalDimensions?: Array<{ width: number; height: number }>;
+  criticalForMobile?: boolean;
+}
 
 export interface CriticalCssResult {
   criticalCss: string;
   criticalSizeKb: number;
   totalCssSizeKb: number;
+}
+
+function getViewportsToExtract(options?: CriticalCssExtractOptions): Array<{ width: number; height: number }> {
+  const dims = options?.criticalDimensions;
+  const forMobile = options?.criticalForMobile !== false;
+  if (!dims?.length) {
+    return forMobile ? [MOBILE_VIEWPORT, DEFAULT_VIEWPORT] : [DEFAULT_VIEWPORT];
+  }
+  const hasMobile = dims.some(d => d.width <= 480);
+  if (!forMobile) {
+    return [dims[dims.length - 1] ?? DEFAULT_VIEWPORT];
+  }
+  if (!hasMobile) {
+    return [MOBILE_VIEWPORT, ...dims];
+  }
+  return dims;
 }
 
 /**
@@ -26,14 +47,19 @@ export interface CriticalCssResult {
  */
 export async function extractCriticalCss(
   html: string,
-  onLog?: (msg: string) => void
+  onLog?: (msg: string) => void,
+  options?: CriticalCssExtractOptions
 ): Promise<CriticalCssResult> {
-  onLog?.('Starting critical CSS extraction...');
+  const viewports = getViewportsToExtract(options);
+  onLog?.(`Starting critical CSS extraction (${viewports.length} viewport(s))...`);
 
   // Serve the HTML locally for Playwright to visit
   const { server, url } = await createTempServer(html);
 
   let browser;
+  const allCriticalCss: string[] = [];
+  let totalCssSize = 0;
+
   try {
     browser = await chromium.launch({
       headless: true,
@@ -45,66 +71,73 @@ export async function extractCriticalCss(
       ],
     });
 
-    const context = await browser.newContext({
-      viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
-    });
-    const page = await context.newPage();
+    for (let v = 0; v < viewports.length; v++) {
+      const { width, height } = viewports[v];
+      onLog?.(`Extracting at viewport ${width}x${height}...`);
 
-    // Start CSS coverage
-    await page.coverage.startCSSCoverage();
-
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await page.waitForTimeout(1000); // let styles settle
-
-    // Get above-fold element classes
-    const aboveFoldClasses = await page.evaluate(() => {
-      const vh = window.innerHeight;
-      const classes = new Set<string>();
-      document.querySelectorAll('*').forEach(el => {
-        const rect = el.getBoundingClientRect();
-        if (rect.top < vh && rect.bottom > 0) {
-          el.classList.forEach(cls => classes.add(cls));
-          // Also capture tag-level selectors
-          classes.add(el.tagName.toLowerCase());
-        }
+      const context = await browser.newContext({
+        viewport: { width, height },
       });
-      return Array.from(classes);
-    });
+      const page = await context.newPage();
 
-    // Stop CSS coverage
-    const coverage = await page.coverage.stopCSSCoverage();
+      // Start CSS coverage
+      await page.coverage.startCSSCoverage();
 
-    await context.close();
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.waitForTimeout(1000); // let styles settle
 
-    // Extract used CSS rules from coverage
-    let criticalCss = '';
-    let totalCssSize = 0;
+      // Get above-fold element classes
+      const aboveFoldClasses = await page.evaluate(() => {
+        const vh = window.innerHeight;
+        const classes = new Set<string>();
+        document.querySelectorAll('*').forEach(el => {
+          const rect = el.getBoundingClientRect();
+          if (rect.top < vh && rect.bottom > 0) {
+            el.classList.forEach(cls => classes.add(cls));
+            classes.add(el.tagName.toLowerCase());
+          }
+        });
+        return Array.from(classes);
+      });
 
-    for (const entry of coverage) {
-      const text = entry.text || '';
-      totalCssSize += text.length;
-      for (const range of entry.ranges) {
-        criticalCss += text.slice(range.start, range.end) + '\n';
+      // Stop CSS coverage
+      const coverage = await page.coverage.stopCSSCoverage();
+
+      await context.close();
+
+      // Extract used CSS rules from coverage
+      let viewportCss = '';
+      let viewportTotalSize = 0;
+      for (const entry of coverage) {
+        const text = entry.text || '';
+        viewportTotalSize += text.length;
+        for (const range of entry.ranges) {
+          viewportCss += text.slice(range.start, range.end) + '\n';
+        }
       }
+      if (totalCssSize === 0) totalCssSize = viewportTotalSize;
+
+      viewportCss = minifyCritical(viewportCss);
+      const viewportSizeKb = Buffer.byteLength(viewportCss, 'utf-8') / 1024;
+      if (viewportSizeKb > MAX_CRITICAL_CSS_KB) {
+        viewportCss = truncateToEssentials(viewportCss, aboveFoldClasses);
+      }
+      allCriticalCss.push(viewportCss);
     }
 
-    // Basic minification of the critical CSS
-    criticalCss = minifyCritical(criticalCss);
-
-    // Enforce size limit
-    const criticalSizeKb = Buffer.byteLength(criticalCss, 'utf-8') / 1024;
-    if (criticalSizeKb > MAX_CRITICAL_CSS_KB) {
-      onLog?.(`Critical CSS ${criticalSizeKb.toFixed(1)}KB exceeds ${MAX_CRITICAL_CSS_KB}KB limit, truncating to essential rules`);
-      criticalCss = truncateToEssentials(criticalCss, aboveFoldClasses);
+    // Merge CSS from all viewports (simple concatenation, minify again to dedupe whitespace)
+    let mergedCss = [...new Set(allCriticalCss)].join('\n');
+    mergedCss = minifyCritical(mergedCss);
+    const finalSizeKb = Buffer.byteLength(mergedCss, 'utf-8') / 1024;
+    if (finalSizeKb > MAX_CRITICAL_CSS_KB) {
+      mergedCss = truncateToEssentials(mergedCss, []);
     }
-
-    const finalSizeKb = Buffer.byteLength(criticalCss, 'utf-8') / 1024;
-    onLog?.(`Critical CSS extracted: ${finalSizeKb.toFixed(1)}KB (from ${(totalCssSize / 1024).toFixed(1)}KB total)`);
+    onLog?.(`Critical CSS extracted: ${finalSizeKb.toFixed(1)}KB (${viewports.length} viewport(s))`);
 
     return {
-      criticalCss,
-      criticalSizeKb: finalSizeKb,
-      totalCssSizeKb: totalCssSize / 1024,
+      criticalCss: mergedCss,
+      criticalSizeKb: Buffer.byteLength(mergedCss, 'utf-8') / 1024,
+      totalCssSizeKb: totalCssSize / 1024 || 0,
     };
   } finally {
     if (browser) await browser.close();

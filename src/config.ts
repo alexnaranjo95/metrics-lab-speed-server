@@ -90,4 +90,7 @@ export const config = {
 
   // AI agent: page navigation timeout (analyzer crawl) — default 90s for slow sites
   AI_ANALYZER_NAV_TIMEOUT_MS: intEnv('AI_ANALYZER_NAV_TIMEOUT_MS', 90000),
+
+  // Crawl: wait after page navigation for JS-rendered content (homepage + BFS)
+  CRAWL_WAIT_AFTER_NAV_MS: intEnv('CRAWL_WAIT_AFTER_NAV_MS', 5000),
 } as const;

@@ -4,6 +4,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { hashContent } from '../utils/crypto.js';
 import { isSameOrigin, urlToPath } from '../utils/url.js';
 import { config } from '../config.js';
+import { matchUrlPattern } from '../shared/settingsMerge.js';
 import { startScreencast, extractOverlays } from './screencast.js';
 import { buildEmitter } from '../events/buildEmitter.js';
 
@@ -18,6 +19,20 @@ export interface CrawlOptions {
   existingPages: Array<{ path: string; contentHash: string }>;
   targetPages?: string[];
   buildId?: string;
+  /** Per-site override for CRAWL_WAIT_AFTER_NAV_MS (ms to wait after navigation) */
+  crawlWaitMs?: number;
+  /** Max pages to crawl (from build.maxPages or config) */
+  maxPages?: number;
+  /** Glob patterns to exclude from crawl (e.g. /wp-admin/*, /feed/*) */
+  excludePatterns?: string[];
+  /** Page load timeout in seconds (for page.goto) */
+  pageLoadTimeout?: number;
+  /** Max retries per page navigation */
+  maxRetries?: number;
+  /** Delay in ms between retries */
+  retryBackoffMs?: number;
+  /** Max concurrent page crawls */
+  maxConcurrentPages?: number;
 }
 
 export interface CrawledPage {
@@ -106,12 +121,26 @@ async function downloadAsset(
   }
 }
 
+/** Common SPA root selectors — wait for one to appear before extracting links */
+const SPA_ROOT_SELECTORS = ['#root', '#__next', '#app', 'main', 'article'];
+
 async function extractPageData(page: Page, siteUrl: string): Promise<{
   html: string;
   title: string;
   internalLinks: string[];
   assetUrls: string[];
 }> {
+  // Wait for common SPA root or main content (helps JS-rendered sites)
+  const waitForContentMs = 3000;
+  try {
+    await Promise.race(
+      SPA_ROOT_SELECTORS.map((sel) => page.waitForSelector(sel, { timeout: waitForContentMs }))
+    );
+    await page.waitForTimeout(500);
+  } catch {
+    // Timeout — none of these selectors found; proceed anyway
+  }
+
   const html = await page.content();
   const title = await page.title();
 
@@ -159,17 +188,17 @@ async function extractPageData(page: Page, siteUrl: string): Promise<{
 async function navigateWithRetry(
   context: BrowserContext,
   url: string,
-  options: { timeout: number; maxRetries: number }
+  options: { timeout: number; maxRetries: number; retryBackoffMs?: number; crawlWaitMs?: number }
 ): Promise<{ page: Page; status: number }> {
-  const { timeout, maxRetries } = options;
+  const { timeout, maxRetries, retryBackoffMs = 5000, crawlWaitMs } = options;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const page = await context.newPage();
     try {
       console.log(`[crawl] Navigating to ${url} (attempt ${attempt}/${maxRetries})`);
 
-      const response = await page.goto(url, {
-        waitUntil: 'domcontentloaded',
+          const response = await page.goto(url, {
+        waitUntil: 'load',
         timeout,
       });
 
@@ -177,7 +206,8 @@ async function navigateWithRetry(
       console.log(`[crawl] Navigation response: status=${status}, url=${url}`);
 
       // Wait for JS-rendered content to load
-      await page.waitForTimeout(3000);
+      const waitMs = crawlWaitMs ?? config.CRAWL_WAIT_AFTER_NAV_MS ?? 5000;
+      await page.waitForTimeout(waitMs);
 
       // Check for bot protection pages
       if (status === 403 || status === 503) {
@@ -186,7 +216,7 @@ async function navigateWithRetry(
 
         if (attempt < maxRetries) {
           await page.close();
-          const delay = attempt * 3000;
+          const delay = retryBackoffMs;
           console.log(`[crawl] Retrying in ${delay}ms...`);
           await new Promise(r => setTimeout(r, delay));
           continue;
@@ -203,7 +233,7 @@ async function navigateWithRetry(
       await page.close();
 
       if (attempt < maxRetries) {
-        const delay = attempt * 3000;
+        const delay = retryBackoffMs;
         console.log(`[crawl] Retrying in ${delay}ms...`);
         await new Promise(r => setTimeout(r, delay));
         continue;
@@ -216,11 +246,31 @@ async function navigateWithRetry(
 }
 
 export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
-  const { siteUrl, workDir, scope, existingPages, targetPages, buildId } = options;
+  const {
+    siteUrl,
+    workDir,
+    scope,
+    existingPages,
+    targetPages,
+    buildId,
+    crawlWaitMs,
+    maxPages: maxPagesOpt,
+    excludePatterns = [],
+    pageLoadTimeout: pageLoadTimeoutSec = 30,
+    maxRetries = 3,
+    retryBackoffMs = 5000,
+    maxConcurrentPages = 3,
+  } = options;
   let stopScreencast: (() => Promise<void>) | null = null;
-  const maxPages = config.MAX_PAGES_PER_SITE;
-  const concurrency = 3;
-  const pageTimeout = 30000;
+  const maxPages = maxPagesOpt ?? config.MAX_PAGES_PER_SITE;
+
+  const isExcluded = (pathStr: string): boolean => {
+    const normalized = pathStr.startsWith('/') ? pathStr : `/${pathStr}`;
+    return excludePatterns.some((p) => matchUrlPattern(normalized, p));
+  };
+  const concurrency = maxConcurrentPages;
+  const pageTimeout = pageLoadTimeoutSec * 1000;
+  const waitMs = crawlWaitMs ?? config.CRAWL_WAIT_AFTER_NAV_MS ?? 5000;
 
   console.log(`[crawl] ========== CRAWL START ==========`);
   console.log(`[crawl] Site URL: ${siteUrl}`);
@@ -295,7 +345,9 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
       try {
         const { page, status } = await navigateWithRetry(context, homepageUrl, {
           timeout: pageTimeout,
-          maxRetries: 3,
+          maxRetries,
+          retryBackoffMs,
+          crawlWaitMs: waitMs,
         });
 
         // Start CDP screencast for live viewer
@@ -314,6 +366,18 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
           const contentHash = hashContent(html);
 
           console.log(`[crawl] Homepage extracted: title="${title}", html=${html.length} bytes, links=${internalLinks.length}, assets=${assetUrls.length}`);
+          // Diagnostic: sample of raw links (helps debug empty queue)
+          if (internalLinks.length > 0) {
+            const sample = internalLinks.slice(0, 10).map((u) => {
+              try {
+                const parsed = new URL(u);
+                return parsed.pathname + (parsed.search || '');
+              } catch {
+                return u;
+              }
+            });
+            console.log(`[crawl] Link sample (first 10): ${JSON.stringify(sample)}`);
+          }
 
           // Download and register assets
           const pageAssets: string[] = [];
@@ -346,22 +410,46 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
             assets: pageAssets,
           });
 
-          // Add discovered internal links
+          // Add discovered internal links (with diagnostic counts)
           let linksAdded = 0;
+          let skippedDifferentOrigin = 0;
+          let skippedFileExt = 0;
+          let skippedWpBloat = 0;
+          let skippedQuery = 0;
+          let skippedVisitedOrQueued = 0;
           for (const link of internalLinks) {
-            if (isSameOrigin(siteUrl, link)) {
-              const linkPath = urlToPath(link, siteUrl);
-              if (!visited.has(linkPath) && !queue.some(q => urlToPath(q, siteUrl) === linkPath)) {
-                if (linkPath.match(/\.(jpg|jpeg|png|gif|svg|pdf|zip|doc|mp4|mp3|css|js)$/i)) continue;
-                if (linkPath.includes('wp-admin') || linkPath.includes('wp-login')) continue;
-                if (linkPath.includes('?') && linkPath.includes('replytocom=')) continue;
-                queue.push(`${siteUrl}${linkPath}`);
-                linksAdded++;
-              }
+            if (!isSameOrigin(siteUrl, link)) {
+              skippedDifferentOrigin++;
+              continue;
             }
+            const linkPath = urlToPath(link, siteUrl);
+            if (visited.has(linkPath) || queue.some((q) => urlToPath(q, siteUrl) === linkPath)) {
+              skippedVisitedOrQueued++;
+              continue;
+            }
+            if (linkPath.match(/\.(jpg|jpeg|png|gif|svg|pdf|zip|doc|mp4|mp3|css|js)$/i)) {
+              skippedFileExt++;
+              continue;
+            }
+            if (linkPath.includes('wp-admin') || linkPath.includes('wp-login')) {
+              skippedWpBloat++;
+              continue;
+            }
+            if (excludePatterns.length > 0 && isExcluded(linkPath)) {
+              continue;
+            }
+            if (linkPath.includes('?') && linkPath.includes('replytocom=')) {
+              skippedQuery++;
+              continue;
+            }
+            queue.push(`${siteUrl}${linkPath}`);
+            linksAdded++;
           }
 
           console.log(`[crawl] Homepage crawled: ${homepagePath} (${title}) - ${pageSize} bytes, ${linksAdded} new links queued`);
+          if (internalLinks.length > 0) {
+            console.log(`[crawl] Link filter stats: total=${internalLinks.length} added=${linksAdded} skippedOrigin=${skippedDifferentOrigin} skippedVisited=${skippedVisitedOrQueued} skippedFileExt=${skippedFileExt} skippedWpBloat=${skippedWpBloat} skippedQuery=${skippedQuery}`);
+          }
         } finally {
           await page.close();
         }
@@ -390,7 +478,7 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
           page = await context.newPage();
 
           const response = await page.goto(url, {
-            waitUntil: 'domcontentloaded',
+            waitUntil: 'load',
             timeout: pageTimeout,
           });
 
@@ -409,8 +497,8 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
             return;
           }
 
-          // Wait for JS-rendered content
-          await page.waitForTimeout(2000);
+          // Wait for JS-rendered content (uses same config as homepage)
+          await page.waitForTimeout(waitMs);
 
           const { html, title, internalLinks, assetUrls } = await extractPageData(page, siteUrl);
           const contentHash = hashContent(html);
@@ -463,6 +551,7 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
                 if (linkPath.match(/\.(jpg|jpeg|png|gif|svg|pdf|zip|doc|mp4|mp3|css|js)$/i)) continue;
                 if (linkPath.includes('wp-admin') || linkPath.includes('wp-login')) continue;
                 if (linkPath.includes('?') && linkPath.includes('replytocom=')) continue;
+                if (excludePatterns.length > 0 && isExcluded(linkPath)) continue;
                 queue.push(`${siteUrl}${linkPath}`);
               }
             }

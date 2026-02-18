@@ -41,12 +41,12 @@ export function SitePage() {
   const triggerMutation = useMutation({
     mutationFn: async () => {
       try {
-        return await api.triggerBuild(siteId!, 'full');
+        return await api.triggerBuild(siteId!);
       } catch (err: any) {
         // If 409 (build in progress), auto-cancel stale builds and retry
         if (err.message?.includes('already in progress')) {
           await api.cancelStaleBuilds(siteId!);
-          return await api.triggerBuild(siteId!, 'full');
+          return await api.triggerBuild(siteId!);
         }
         throw err;
       }

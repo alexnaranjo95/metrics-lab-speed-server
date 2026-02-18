@@ -7,6 +7,34 @@ import type { OptimizationSettings } from '../shared/settingsSchema.js';
 // Default responsive widths for use in rewriteImageTags (used when no settings passed)
 const DEFAULT_RESPONSIVE_WIDTHS = [320, 640, 768, 1024, 1280, 1920];
 
+/** Extract data-sizes value from img attributes (e.g. WordPress) for accurate responsive sizing */
+function parseDataSizes(attrs: string): string | null {
+  const m = attrs.match(/data-sizes=["']([^"']+)["']/i);
+  return m ? m[1].trim() : null;
+}
+
+/** Extract width and height attributes from img attrs to preserve for CLS */
+function parseWidthHeight(attrs: string): { width?: string; height?: string } {
+  const widthMatch = attrs.match(/width=["'](\d+)["']/i);
+  const heightMatch = attrs.match(/height=["'](\d+)["']/i);
+  return {
+    width: widthMatch ? widthMatch[1] : undefined,
+    height: heightMatch ? heightMatch[1] : undefined,
+  };
+}
+
+/** Infer max displayed width from data-sizes (e.g. "580px") or width attribute */
+function parseMaxDisplayWidth(attrs: string): number | null {
+  const sizes = attrs.match(/data-sizes=["']([^"']+)["']/i)?.[1];
+  if (sizes) {
+    const pxMatch = sizes.match(/(\d+)px/);
+    if (pxMatch) return parseInt(pxMatch[1], 10);
+  }
+  const widthMatch = attrs.match(/width=["'](\d+)["']/i);
+  if (widthMatch) return parseInt(widthMatch[1], 10);
+  return null;
+}
+
 export interface ImageOptimizeResult {
   originalBytes: number;
   optimizedBytes: number;
@@ -31,9 +59,9 @@ export async function optimizeImage(
 ): Promise<ImageOptimizeResult> {
   // Derive quality settings from resolved settings or use defaults
   const imgs = settings?.images;
-  
-  // Enhanced quality tiers based on image importance
-  const qualityTier = determineQualityTier(imageRelativePath, isLCPCandidate);
+
+  // Quality tiers from settings (hero/standard/thumbnail) or fallback to hardcoded
+  const qualityTier = determineQualityTier(imageRelativePath, isLCPCandidate, imgs?.qualityTiers);
   const JPEG_QUALITY = imgs?.jpeg?.quality ?? qualityTier.jpeg;
   const PNG_QUALITY = imgs?.jpeg?.quality ?? qualityTier.png;
   const WEBP_QUALITY = imgs?.webp?.quality ?? qualityTier.webp;
@@ -43,8 +71,9 @@ export async function optimizeImage(
   
   const RESPONSIVE_WIDTHS = imgs?.breakpoints ?? [400, 800, 1200, 1600];
   const MAX_WIDTH = imgs?.maxWidth ?? 2560;
-  const convertToWebp = imgs?.convertToWebp ?? true;
-  const convertToAvif = imgs?.convertToAvif ?? true; // Default to true for modern optimization
+  const format = imgs?.format ?? 'auto';
+  const convertToWebp = format === 'avif' ? false : (imgs?.convertToWebp ?? true);
+  const convertToAvif = format === 'webp' ? false : (imgs?.convertToAvif ?? (format === 'auto' || format === 'avif'));
   const generateSrcset = imgs?.generateSrcset ?? true;
   const keepOriginalAsFallback = imgs?.keepOriginalAsFallback ?? true;
   const stripMetadata = imgs?.stripMetadata ?? true;
@@ -234,40 +263,41 @@ async function optimizeByFormat(input: Buffer, ext: string, srcWidth: number, op
 }
 
 /**
- * Determine quality tier based on image importance and use case
+ * Determine quality tier based on image importance and use case.
+ * Uses settings.images.qualityTiers when present, else hardcoded defaults.
  */
-function determineQualityTier(imagePath: string, isLCPCandidate?: boolean): {
-  jpeg: number;
-  png: number;
-  webp: number;
-  avif: number;
-} {
-  // LCP images get highest quality (Hero tier)
+function determineQualityTier(
+  imagePath: string,
+  isLCPCandidate?: boolean,
+  qualityTiers?: { hero?: { quality?: number }; standard?: { quality?: number }; thumbnail?: { quality?: number } }
+): { jpeg: number; png: number; webp: number; avif: number } {
+  const heroQ = qualityTiers?.hero?.quality ?? 88;
+  const standardQ = qualityTiers?.standard?.quality ?? 75;
+  const thumbQ = qualityTiers?.thumbnail?.quality ?? 65;
+
   if (isLCPCandidate) {
     return {
-      jpeg: 88,
-      png: 85,
-      webp: 85,
-      avif: 60,
+      jpeg: heroQ,
+      png: Math.min(heroQ + 2, 95),
+      webp: heroQ,
+      avif: Math.round(heroQ * 0.68),
     };
   }
 
-  // Thumbnail/small images can use lower quality
   if (imagePath.includes('thumb') || imagePath.includes('small') || imagePath.includes('icon')) {
     return {
-      jpeg: 65,
-      png: 70,
-      webp: 70,
-      avif: 40,
+      jpeg: thumbQ,
+      png: Math.min(thumbQ + 5, 90),
+      webp: thumbQ,
+      avif: Math.round(thumbQ * 0.62),
     };
   }
 
-  // Standard quality for most images
   return {
-    jpeg: 78,
-    png: 80,
-    webp: 80,
-    avif: 50,
+    jpeg: standardQ,
+    png: Math.min(standardQ + 5, 90),
+    webp: standardQ,
+    avif: Math.round(standardQ * 0.6),
   };
 }
 
@@ -348,10 +378,11 @@ export function rewriteImageTags(
   settings?: OptimizationSettings
 ): string {
   const imgs = settings?.images;
+  const format = imgs?.format ?? 'auto';
   const opts: ImageRewriteSettings = imgs
     ? {
-        convertToWebp: imgs.convertToWebp ?? true,
-        convertToAvif: imgs.convertToAvif ?? false,
+        convertToWebp: format === 'avif' ? false : (imgs.convertToWebp ?? true),
+        convertToAvif: format === 'webp' ? false : (imgs.convertToAvif ?? (format === 'auto' || format === 'avif')),
         keepOriginalAsFallback: imgs.keepOriginalAsFallback ?? true,
         generateSrcset: imgs.generateSrcset ?? true,
         breakpoints: imgs.breakpoints ?? DEFAULT_RESPONSIVE_WIDTHS,
@@ -400,8 +431,13 @@ export function rewriteImageTags(
           ? 'loading="eager" fetchpriority="high"'
           : '';
 
-      const cleanBefore = before.replace(/\s*(loading|decoding|fetchpriority)=["'][^"']*["']/gi, '');
-      const cleanAfter = after.replace(/\s*(loading|decoding|fetchpriority)=["'][^"']*["']/gi, '');
+      const cleanBefore = before
+        .replace(/\s*(loading|decoding|fetchpriority)=["'][^"']*["']/gi, '')
+        .replace(/\s*(width|height)=["']\d+["']/gi, '');
+      const cleanAfter = after
+        .replace(/\s*(loading|decoding|fetchpriority)=["'][^"']*["']/gi, '')
+        .replace(/\s*(width|height)=["']\d+["']/gi, '');
+      const allAttrs = before + after;
 
       const basePath = src.replace(/\.[^.]+$/, '');
       const avifSrc = `${basePath}.avif`;
@@ -414,13 +450,28 @@ export function rewriteImageTags(
 
       const fallbackSrc = opts.keepOriginalAsFallback ? src : (opts.convertToWebp ? webpSrc : src);
 
+      const maxDisplayWidth = parseMaxDisplayWidth(allAttrs);
+      const dataSizes = parseDataSizes(allAttrs);
+      const cappedBreakpoints = maxDisplayWidth
+        ? opts.breakpoints.filter((w) => w <= maxDisplayWidth)
+        : opts.breakpoints;
+      const nextAbove = maxDisplayWidth
+        ? opts.breakpoints.find((w) => w >= maxDisplayWidth)
+        : null;
+      const effectiveBreakpoints = cappedBreakpoints.length
+        ? cappedBreakpoints
+        : nextAbove
+          ? [nextAbove]
+          : opts.breakpoints;
+
       const avifSource = opts.convertToAvif
         ? `<source srcset="${avifSrc}" type="image/avif">`
         : '';
+      const maxSrcsetW = effectiveBreakpoints.length ? Math.max(...effectiveBreakpoints) : 1920;
       const webpSrcset = opts.generateSrcset && opts.convertToWebp
-        ? opts.breakpoints
+        ? effectiveBreakpoints
             .map((w) => `${basePath}-${w}w.webp ${w}w`)
-            .concat(`${webpSrc} 1920w`)
+            .concat(maxSrcsetW >= 1920 ? `${webpSrc} 1920w` : [])
             .join(', ')
         : webpSrc;
       const webpSource = opts.convertToWebp
@@ -431,10 +482,14 @@ export function rewriteImageTags(
         .filter(Boolean)
         .join('');
       const sizesAttr = opts.generateSrcset && opts.convertToWebp
-        ? ' sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 1200px"'
+        ? dataSizes
+          ? ` sizes="${dataSizes.replace(/"/g, '&quot;')}"`
+          : ' sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 1200px"'
         : '';
 
-      const imgTag = `<img ${cleanBefore}src="${fallbackSrc}"${cleanAfter}${loadingAttr ? ` ${loadingAttr}` : ''}>`;
+      const { width: w, height: h } = parseWidthHeight(allAttrs);
+      const explicitDims = (w && h) ? ` width="${w}" height="${h}"` : '';
+      const imgTag = `<img ${cleanBefore}src="${fallbackSrc}"${cleanAfter}${explicitDims}${sizesAttr}${loadingAttr ? ` ${loadingAttr}` : ''}>`;
       return `<picture>${pictureContent}${imgTag}</picture>`;
     }
   );
@@ -473,15 +528,14 @@ export async function injectImageDimensions(html: string, workDir: string): Prom
       continue;
     }
 
-    // Resolve the image path
-    let imagePath: string;
-    if (src.startsWith('/')) {
-      imagePath = path.join(workDir, src);
-    } else {
-      imagePath = path.join(workDir, src);
+    // Resolve the image path (assets live at workDir/assets/)
+    const srcNormalized = src.startsWith('/') ? src.slice(1) : src;
+    let imagePath = path.join(workDir, srcNormalized);
+    let dims = await getImageDimensions(imagePath);
+    if (!dims && path.basename(srcNormalized) !== srcNormalized) {
+      const fallbackPath = path.join(workDir, 'assets', path.basename(srcNormalized));
+      dims = await getImageDimensions(fallbackPath);
     }
-
-    const dims = await getImageDimensions(imagePath);
     if (dims) {
       const widthAttr = /width=["']/i.test(before + after) ? '' : ` width="${dims.width}"`;
       const heightAttr = /height=["']/i.test(before + after) ? '' : ` height="${dims.height}"`;

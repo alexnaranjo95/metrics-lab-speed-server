@@ -36,7 +36,7 @@ export function BuildHistoryPage() {
   });
 
   const triggerMutation = useMutation({
-    mutationFn: () => api.triggerBuild(siteId!, 'full'),
+    mutationFn: () => api.triggerBuild(siteId!),
     onSuccess: () => {
       setPollEnabled(true);
       queryClient.invalidateQueries({ queryKey: ['builds', siteId] });

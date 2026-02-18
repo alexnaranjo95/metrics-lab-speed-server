@@ -55,11 +55,25 @@ export async function optimizeFonts(
   const preloadTags: string[] = [];
   const criticalFontPaths: string[] = [];
 
+  const subsetting = settings?.fonts.subsetting ?? false;
+  const subsets = settings?.fonts.subsets ?? ['latin'];
+  const formatPreference = settings?.fonts.formatPreference ?? 'woff2';
+
   for (const { href, element } of googleFontLinks) {
     try {
-      // Download the Google Fonts CSS (request woff2 format)
-      const cssResponse = await fetch(href, {
-        headers: { 'User-Agent': CHROME_UA },
+      let fontCssUrl = href;
+      if (subsetting && subsets.length > 0) {
+        const subsetParam = `subset=${subsets.join(',')}`;
+        fontCssUrl = href.includes('?') ? `${href}&${subsetParam}` : `${href}?${subsetParam}`;
+      }
+
+      // Use Chrome UA for woff2; older UA for woff (legacy browser support)
+      const ua = (formatPreference === 'woff2' || formatPreference === 'both')
+        ? CHROME_UA
+        : 'Mozilla/5.0 (Windows NT 6.1; rv:31.0) Gecko/20100101 Firefox/31.0';
+
+      const cssResponse = await fetch(fontCssUrl, {
+        headers: { 'User-Agent': ua },
         signal: AbortSignal.timeout(10000),
       });
 
@@ -107,8 +121,9 @@ export async function optimizeFonts(
   }
 
   // Generate preload tags for critical fonts
+  const fontType = formatPreference === 'woff' ? 'font/woff' : 'font/woff2';
   for (const fontPath of criticalFontPaths) {
-    const tag = `<link rel="preload" as="font" type="font/woff2" crossorigin href="${fontPath}">`;
+    const tag = `<link rel="preload" as="font" type="${fontType}" crossorigin href="${fontPath}">`;
     preloadTags.push(tag);
     // Insert preload early in <head>
     $('head').prepend(tag);

@@ -9,7 +9,9 @@ import { JsTab } from './tabs/JsTab';
 import { HtmlFontsTab } from './tabs/HtmlFontsTab';
 import { CacheTab } from './tabs/CacheTab';
 import { AiBuildTab } from './tabs/AiBuildTab';
-import { Image, Video, Palette, Code2, FileText, Shield, Bot, RotateCcw, Save, X, AlertCircle } from 'lucide-react';
+import { CLSTab } from './tabs/CLSTab';
+import { SEOTab } from './tabs/SEOTab';
+import { Image, Video, Palette, Code2, FileText, Shield, Bot, RotateCcw, Save, X, AlertCircle, Layout, Search } from 'lucide-react';
 
 const TABS = [
   { id: 'images', label: 'Images', icon: Image },
@@ -17,6 +19,8 @@ const TABS = [
   { id: 'css', label: 'CSS', icon: Palette },
   { id: 'js', label: 'JavaScript', icon: Code2 },
   { id: 'html-fonts', label: 'HTML & Fonts', icon: FileText },
+  { id: 'cls', label: 'CLS & Layout', icon: Layout },
+  { id: 'seo', label: 'SEO', icon: Search },
   { id: 'cache', label: 'Headers & Cache', icon: Shield },
   { id: 'ai-build', label: 'AI & Build', icon: Bot },
 ] as const;
@@ -107,6 +111,8 @@ export function SettingsPanel({ siteId }: SettingsPanelProps) {
       else if (key === 'css') tabs.add('css');
       else if (key === 'js') tabs.add('js');
       else if (key === 'html' || key === 'fonts') tabs.add('html-fonts');
+      else if (key === 'cls') tabs.add('cls');
+      else if (key === 'seo') tabs.add('seo');
       else if (key === 'cache' || key === 'resourceHints') tabs.add('cache');
       else if (key === 'ai' || key === 'build') tabs.add('ai-build');
     }
@@ -154,7 +160,7 @@ export function SettingsPanel({ siteId }: SettingsPanelProps) {
       {/* Tabs */}
       <div className="flex border-b border-[hsl(var(--border))] overflow-x-auto">
         {TABS.map(tab => {
-          const hasOverrides = diff[tab.id === 'html-fonts' ? 'html' : tab.id === 'ai-build' ? 'ai' : tab.id];
+          const hasOverrides = diff[tab.id === 'html-fonts' ? 'html' : tab.id === 'ai-build' ? 'ai' : tab.id === 'cls' ? 'cls' : tab.id === 'seo' ? 'seo' : tab.id];
           const isDirty = dirtyTabs.has(tab.id);
           return (
             <button
@@ -204,6 +210,8 @@ export function SettingsPanel({ siteId }: SettingsPanelProps) {
             {activeTab === 'css' && <CssTab settings={settings.css} defaults={defaults?.css} diff={diff.css} onChange={(v) => updateField(['css'], v)} />}
             {activeTab === 'js' && <JsTab settings={settings.js} defaults={defaults?.js} diff={diff.js} onChange={(v) => updateField(['js'], v)} />}
             {activeTab === 'html-fonts' && <HtmlFontsTab settings={{ html: settings.html, fonts: settings.fonts }} defaults={{ html: defaults?.html, fonts: defaults?.fonts }} diff={{ html: diff.html, fonts: diff.fonts }} onChange={(section, v) => updateField([section], v)} />}
+            {activeTab === 'cls' && <CLSTab settings={settings.cls ?? {}} defaults={defaults?.cls} diff={diff.cls} onChange={(v) => updateField(['cls'], v)} />}
+            {activeTab === 'seo' && <SEOTab settings={settings.seo ?? {}} defaults={defaults?.seo} diff={diff.seo} onChange={(v) => updateField(['seo'], v)} />}
             {activeTab === 'cache' && <CacheTab settings={settings.cache} defaults={defaults?.cache} diff={diff.cache} onChange={(v) => updateField(['cache'], v)} resourceHints={settings.resourceHints} resourceHintsDiff={diff.resourceHints} onResourceHintsChange={(v) => updateField(['resourceHints'], v)} />}
             {activeTab === 'ai-build' && <AiBuildTab settings={{ ai: settings.ai, build: settings.build }} defaults={{ ai: defaults?.ai, build: defaults?.build }} diff={{ ai: diff.ai, build: diff.build }} onChange={(section, v) => updateField([section], v)} />}
           </>

@@ -61,14 +61,21 @@ export function generateCloudflareProjectName(domain: string): string {
   return name.slice(0, 63);
 }
 
+/** Normalize hostname for origin comparison (www.example.com === example.com) */
+function normalizeHostForOrigin(hostname: string): string {
+  const lower = hostname.toLowerCase();
+  return lower.startsWith('www.') ? lower.slice(4) : lower;
+}
+
 /**
  * Check if a URL is on the same origin as the base URL.
+ * Treats www.example.com and example.com as same origin.
  */
 export function isSameOrigin(baseUrl: string, testUrl: string): boolean {
   try {
     const base = new URL(baseUrl);
     const test = new URL(testUrl, baseUrl);
-    return base.hostname === test.hostname;
+    return normalizeHostForOrigin(base.hostname) === normalizeHostForOrigin(test.hostname);
   } catch {
     return false;
   }

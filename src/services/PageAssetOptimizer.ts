@@ -60,7 +60,7 @@ export async function optimizePageAssets(
   const { html, siteId, siteUrl, settings, workDir } = input;
   const imgSettings = (settings as any).imageMigration;
 
-  if (!imgSettings?.enabled) {
+  if (!imgSettings?.enabled || imgSettings?.useCfImages === false) {
     return {
       optimizedHtml: html,
       report: {
@@ -104,6 +104,12 @@ export async function optimizePageAssets(
         message: `Migrating images: ${migrated}/${total}`,
         data: { migrated, total, currentUrl },
       });
+    },
+    workDir,
+    {
+      skipSvg: imgSettings?.skipSvg,
+      maxSizeMb: imgSettings?.maxSizeMb,
+      concurrency: imgSettings?.concurrency,
     }
   );
 

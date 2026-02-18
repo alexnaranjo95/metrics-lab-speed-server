@@ -92,6 +92,24 @@ export function CacheTab({ settings, defaults, diff, onChange, resourceHints, re
           <SettingField label="Remove Unused Preconnects" description="Clean up preconnect hints for unused origins" isOverridden={resourceHintsDiff?.removeUnusedPreconnects}>
             <Toggle checked={resourceHints.removeUnusedPreconnects} onChange={(v) => onResourceHintsChange({ removeUnusedPreconnects: v })} />
           </SettingField>
+          <SettingField label="Custom Preconnect Domains" description="Extra origins for preconnect (one per line)" isOverridden={resourceHintsDiff?.customPreconnectDomains}>
+            <textarea
+              value={(resourceHints.customPreconnectDomains ?? []).join('\n')}
+              onChange={(e) => onResourceHintsChange({ customPreconnectDomains: e.target.value.split('\n').map(d => d.trim()).filter(Boolean) })}
+              placeholder="https://cdn.example.com&#10;https://fonts.googleapis.com"
+              rows={2}
+              className="w-full px-3 py-2 text-sm font-mono rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))]"
+            />
+          </SettingField>
+          <SettingField label="Custom DNS Prefetch Domains" description="Extra origins for dns-prefetch (one per line)" isOverridden={resourceHintsDiff?.customDnsPrefetchDomains}>
+            <textarea
+              value={(resourceHints.customDnsPrefetchDomains ?? []).join('\n')}
+              onChange={(e) => onResourceHintsChange({ customDnsPrefetchDomains: e.target.value.split('\n').map(d => d.trim()).filter(Boolean) })}
+              placeholder="https://analytics.example.com&#10;https://ad-server.example.com"
+              rows={2}
+              className="w-full px-3 py-2 text-sm font-mono rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))]"
+            />
+          </SettingField>
         </SettingCard>
       )}
     </div>

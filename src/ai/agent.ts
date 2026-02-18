@@ -6,7 +6,7 @@ import { db } from '../db/index.js';
 import { sites, builds, agentRuns } from '../db/schema.js';
 import { buildQueue } from '../queue/buildQueue.js';
 import { buildEmitter } from '../events/buildEmitter.js';
-import { deepMerge } from '../shared/settingsMerge.js';
+import { deepMerge, invalidateSettingsCache } from '../shared/settingsMerge.js';
 import { analyzeSite } from './analyzer.js';
 import { generateOptimizationPlan } from './planner.js';
 import { fetchFullPageSpeedData, isPageSpeedAvailable, type OptimizationWorkflow } from '../services/pagespeed.js';
@@ -265,7 +265,8 @@ async function runOptimizationAgentInternal(
     if (!isResume || !opts.plan) {
       setPhase('planning');
       log('PHASE 1B: AI generating optimization plan...');
-      plan = await generateOptimizationPlan(inventory, log, pageSpeedData as OptimizationWorkflow | null);
+      const existingSettings = (site.settings as Record<string, any>) ?? {};
+      plan = await generateOptimizationPlan(inventory, log, pageSpeedData as OptimizationWorkflow | null, existingSettings);
       currentSettings = plan.settings || {};
       await saveCheckpoint({ inventory: inventory as any, plan: plan as any, pageSpeedData, currentSettings, lastCompletedPhase: 'planning' });
     }
@@ -289,7 +290,13 @@ async function runOptimizationAgentInternal(
 
         logSettingsDecisions(currentSettings, log);
 
-        await db.update(sites).set({ settings: currentSettings, updatedAt: new Date() }).where(eq(sites.id, siteId));
+        // Merge AI settings with existing site settings (preserve user overrides)
+        const siteRow = await db.query.sites.findFirst({ where: eq(sites.id, siteId) });
+        const existingSettings = (siteRow?.settings as Record<string, any>) ?? {};
+        const mergedSettings = deepMerge(existingSettings, currentSettings);
+
+        await db.update(sites).set({ settings: mergedSettings, updatedAt: new Date() }).where(eq(sites.id, siteId));
+        await invalidateSettingsCache(siteId);
 
         const buildId = `build_${nanoid(12)}`;
         const existingBuilds = await db.select({ id: builds.id }).from(builds).where(eq(builds.siteId, siteId));

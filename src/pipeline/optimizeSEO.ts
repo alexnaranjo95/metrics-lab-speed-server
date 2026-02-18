@@ -25,6 +25,16 @@ export async function optimizeSEO(
       autoGenerateAltText?: boolean;
       metaTagInjection?: boolean;
       structuredDataInjection?: boolean;
+      openGraphTags?: boolean;
+      twitterCardMeta?: boolean;
+      canonicalUrlGeneration?: boolean;
+      robotsMetaOptimization?: boolean;
+      linkTextOptimization?: boolean;
+      crawlableLinksFixing?: boolean;
+      fontSizeValidation?: boolean;
+      tapTargetOptimization?: boolean;
+      headingHierarchyFix?: boolean;
+      metaKeywordsGeneration?: boolean;
       siteUrl?: string;
       siteName?: string;
       defaultTitle?: string;
@@ -51,6 +61,16 @@ export async function optimizeSEO(
     autoGenerateAltText: true,
     metaTagInjection: true,
     structuredDataInjection: true,
+    openGraphTags: true,
+    twitterCardMeta: true,
+    canonicalUrlGeneration: true,
+    robotsMetaOptimization: true,
+    linkTextOptimization: true,
+    crawlableLinksFixing: true,
+    fontSizeValidation: true,
+    tapTargetOptimization: true,
+    headingHierarchyFix: true,
+    metaKeywordsGeneration: false,
     siteUrl: '',
     siteName: '',
     defaultTitle: '',
@@ -66,39 +86,59 @@ export async function optimizeSEO(
   // SEO Audit 3: Document has a valid viewport meta tag
   result.metaTagsInjected += ensureViewportMeta($);
 
-  // SEO Audit 4: Document has a valid canonical URL
-  result.metaTagsInjected += ensureCanonicalUrl($, seoSettings);
+  // SEO Audit 4: Document has a valid canonical URL (gated)
+  if (seoSettings.canonicalUrlGeneration !== false) {
+    result.metaTagsInjected += ensureCanonicalUrl($, seoSettings);
+  }
 
-  // SEO Audit 5: Document has meta robots tag with index, follow
-  result.metaTagsInjected += ensureRobotsMeta($);
+  // SEO Audit 5: Document has meta robots tag with index, follow (gated)
+  if (seoSettings.robotsMetaOptimization !== false) {
+    result.metaTagsInjected += ensureRobotsMeta($);
+  }
 
   // SEO Audit 6: Image elements have [alt] attributes
   result.altAttributesAdded = await ensureImageAltAttributes($, seoSettings);
 
-  // SEO Audit 7: Links have descriptive text
-  result.linksOptimized = optimizeLinkText($);
+  // SEO Audit 7: Links have descriptive text (gated)
+  if (seoSettings.linkTextOptimization !== false) {
+    result.linksOptimized = optimizeLinkText($);
+  }
 
-  // SEO Audit 8: Links are crawlable (no javascript:void(0))
-  result.crawlableLinksFixed = fixCrawlableLinks($);
+  // SEO Audit 8: Links are crawlable (gated)
+  if (seoSettings.crawlableLinksFixing !== false) {
+    result.crawlableLinksFixed = fixCrawlableLinks($);
+  }
 
-  // SEO Audit 9: Page has legible font size (>=12px for 60%+ of text)
-  result.fontSizesValidated = validateFontSizes($);
+  // SEO Audit 9: Page has legible font size (gated)
+  if (seoSettings.fontSizeValidation !== false) {
+    result.fontSizesValidated = validateFontSizes($);
+  }
 
-  // SEO Audit 10: Tap targets are properly sized (>=48x48px)
-  result.tapTargetsOptimized = optimizeTapTargets($);
+  // SEO Audit 10: Tap targets are properly sized (gated)
+  if (seoSettings.tapTargetOptimization !== false) {
+    result.tapTargetsOptimized = optimizeTapTargets($);
+  }
 
-  // SEO Audit 11: Document uses proper heading hierarchy
-  result.headingHierarchyFixed = fixHeadingHierarchy($);
+  // SEO Audit 11: Document uses proper heading hierarchy (gated)
+  if (seoSettings.headingHierarchyFix !== false) {
+    result.headingHierarchyFixed = fixHeadingHierarchy($);
+  }
 
   // SEO Audit 12: Structured data (JSON-LD) for rich snippets
   if (seoSettings.structuredDataInjection) {
     result.structuredDataInjected = injectStructuredData($, seoSettings);
   }
 
-  // Additional SEO enhancements
-  addOpenGraphTags($, seoSettings);
-  addTwitterCardMeta($, seoSettings);
-  optimizeMetaKeywords($);
+  // Additional SEO enhancements (gated)
+  if (seoSettings.openGraphTags !== false) {
+    addOpenGraphTags($, seoSettings);
+  }
+  if (seoSettings.twitterCardMeta !== false) {
+    addTwitterCardMeta($, seoSettings);
+  }
+  if (seoSettings.metaKeywordsGeneration) {
+    optimizeMetaKeywords($);
+  }
 
   return { html: $.html(), result };
 }

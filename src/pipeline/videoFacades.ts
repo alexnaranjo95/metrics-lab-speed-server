@@ -71,6 +71,7 @@ export async function replaceVideoEmbeds(
   const useCfImages = (video as any)?.useCfImages ?? true;
   const useCfStream = (video as any)?.useCfStream ?? true;
   const aboveTheFoldDetection = (video as any)?.aboveTheFoldDetection ?? true;
+  const youtubeParams = (video as any)?.youtubeParams ?? '';
 
   let videoIndex = 0;
 
@@ -104,7 +105,7 @@ export async function replaceVideoEmbeds(
         }
       } else {
         // ── System B: Click-to-play facade ──
-        await processClickToPlayVideo($, iframe, resolved, aboveTheFold, screenshotTimestamp, useCfImages, useNocookie, workDir, preloadTags);
+        await processClickToPlayVideo($, iframe, resolved, aboveTheFold, screenshotTimestamp, useCfImages, useNocookie, youtubeParams, workDir, preloadTags);
         facadesApplied++;
         videoIndex++;
       }
@@ -289,9 +290,16 @@ async function processClickToPlayVideo(
   timestampSeconds: number,
   useCfImages: boolean,
   useNocookie: boolean,
+  youtubeParams: string,
   workDir: string,
   preloadTags: string[]
 ): Promise<void> {
+  let embedUrl = resolved.embedUrl;
+  if (resolved.platform === 'youtube' && youtubeParams.trim()) {
+    const sep = embedUrl.includes('?') ? '&' : '?';
+    embedUrl = `${embedUrl}${sep}${youtubeParams.trim()}`;
+  }
+
   const screenshot = await captureVideoScreenshot({
     videoUrl: resolved.screenshotUrl,
     platform: resolved.platform,
@@ -310,7 +318,7 @@ async function processClickToPlayVideo(
   const { facadeHtml, preloadTag } = buildFacade({
     platform: resolved.platform,
     videoId: resolved.videoId,
-    embedUrl: resolved.embedUrl,
+    embedUrl,
     thumbnailUrl: uploaded.publicUrl,
     thumbUrl: uploaded.thumbUrl,
     actualWidth: screenshot.actualWidth,

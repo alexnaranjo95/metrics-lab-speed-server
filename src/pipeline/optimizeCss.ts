@@ -14,6 +14,13 @@ export interface CssOptimizeResult {
 
 type Aggressiveness = 'safe' | 'moderate' | 'aggressive';
 
+/** Optional blocklist presets for Elementor/Astra sites. Merge into purgeBlocklistPatterns when appropriate. */
+export const ELEMENTOR_BLOCKLIST_PRESET = [
+  '/^elementor-widget-accordion$/',
+  '/^elementor-widget-tabs$/',
+  '/^elementor-widget-toggle$/',
+] as const;
+
 /** Get safelist by aggressiveness level; merge custom patterns from schema. */
 function getSafelist(aggressiveness: Aggressiveness, customSafelist?: { standard?: string[]; deep?: string[]; greedy?: string[] }) {
   const toRegExp = (p: string) => {

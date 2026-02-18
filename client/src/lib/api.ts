@@ -103,10 +103,11 @@ export const api = {
     fetchJson<{ builds: Build[]; total: number }>(`/sites/${siteId}/builds?limit=${limit}&offset=${offset}`),
   getBuild: (siteId: string, buildId: string) =>
     fetchJson<Build>(`/sites/${siteId}/builds/${buildId}`),
-  triggerBuild: (siteId: string, scope: string = 'full') =>
+  /** Trigger a build. Omit scope/pages to use site's build settings (scope, customUrls, etc.). */
+  triggerBuild: (siteId: string, scope?: 'full' | 'partial', pages?: string[]) =>
     fetchJson<{ build: Build }>(`/sites/${siteId}/builds`, {
       method: 'POST',
-      body: JSON.stringify({ scope }),
+      body: JSON.stringify(scope !== undefined || pages !== undefined ? { scope, pages } : {}),
     }),
   cancelStaleBuilds: (siteId: string) =>
     fetchJson<{ cancelled: number; buildIds?: string[] }>(`/sites/${siteId}/builds/cancel-stale`, {

@@ -26,6 +26,18 @@ export function JsTab({ settings, defaults, diff, onChange }: Props) {
         </SettingField>
       </SettingCard>
 
+      <SettingCard title="Custom Remove Patterns" description="Remove scripts whose src matches these patterns. One per line. Use /regex/ for regex.">
+        <SettingField label="Patterns" description="Substring match or /regex/" isOverridden={diff?.customRemovePatterns}>
+          <textarea
+            value={Array.isArray(settings.customRemovePatterns) ? settings.customRemovePatterns.join('\n') : ''}
+            onChange={(e) => onChange({ customRemovePatterns: e.target.value.split('\n').map(s => s.trim()).filter(Boolean) })}
+            placeholder="analytics.js&#10;tracking.min.js&#10;/my-custom-script-\d+\.js/"
+            rows={3}
+            className="w-full rounded border border-gray-300 px-3 py-2 text-sm font-mono"
+          />
+        </SettingField>
+      </SettingCard>
+
       <SettingCard title="WordPress Scripts Removal" description="Scripts safe to remove from static HTML. All checked by default.">
         {WP_SCRIPTS.map(script => (
           <SettingField key={script.key} label={script.label} description={script.description} isOverridden={diff?.removeScripts?.[script.key]}>

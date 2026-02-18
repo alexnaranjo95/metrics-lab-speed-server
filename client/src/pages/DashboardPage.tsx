@@ -97,7 +97,7 @@ export function DashboardPage() {
 function SiteCard({ site }: { site: SiteWithBuild }) {
   const queryClient = useQueryClient();
   const triggerMutation = useMutation({
-    mutationFn: () => api.triggerBuild(site.id, 'full'),
+    mutationFn: () => api.triggerBuild(site.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sites'] });
     },

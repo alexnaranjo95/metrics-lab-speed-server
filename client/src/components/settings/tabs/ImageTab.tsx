@@ -27,17 +27,43 @@ export function ImageTab({ settings, defaults, diff, onChange, migrationSettings
 
       <SettingCard title="Quality Controls" description="Configure compression quality per output format. Lower quality = smaller files.">
         <SettingField label="WebP Quality" description="Sweet spot: 78-82. Default: 80" isOverridden={diff?.webp?.quality}>
-          <Slider value={settings.webp.quality} min={1} max={100} onChange={(v) => onChange({ webp: { quality: v } })} />
+          <Slider value={settings.webp.quality} min={1} max={100} onChange={(v) => onChange({ webp: { ...settings.webp, quality: v } })} />
+        </SettingField>
+        <SettingField label="WebP Effort" description="0-6. Higher = smaller file, slower encode. Default: 4" isOverridden={diff?.webp?.effort}>
+          <Slider value={settings.webp?.effort ?? 4} min={0} max={6} onChange={(v) => onChange({ webp: { ...settings.webp, effort: v } })} />
         </SettingField>
         <SettingField label="AVIF Quality" description="AVIF 50 = JPEG 80 at 30-50% smaller. Default: 50" isOverridden={diff?.avif?.quality}>
-          <Slider value={settings.avif.quality} min={1} max={100} onChange={(v) => onChange({ avif: { quality: v } })} />
+          <Slider value={settings.avif.quality} min={1} max={100} onChange={(v) => onChange({ avif: { ...settings.avif, quality: v } })} />
+        </SettingField>
+        <SettingField label="AVIF Effort" description="0-9. Higher = smaller file, slower encode. Default: 4" isOverridden={diff?.avif?.effort}>
+          <Slider value={settings.avif?.effort ?? 4} min={0} max={9} onChange={(v) => onChange({ avif: { ...settings.avif, effort: v } })} />
         </SettingField>
         <SettingField label="JPEG Quality" description="MozJPEG mode. Sweet spot: 75-82. Default: 80" isOverridden={diff?.jpeg?.quality}>
-          <Slider value={settings.jpeg.quality} min={1} max={100} onChange={(v) => onChange({ jpeg: { quality: v } })} />
+          <Slider value={settings.jpeg.quality} min={1} max={100} onChange={(v) => onChange({ jpeg: { ...settings.jpeg, quality: v } })} />
+        </SettingField>
+        <SettingField label="Hero Quality" description="Above-the-fold images" isOverridden={diff?.qualityTiers?.hero?.quality}>
+          <Slider value={settings.qualityTiers?.hero?.quality ?? 88} min={50} max={100} onChange={(v) => onChange({ qualityTiers: { ...settings.qualityTiers, hero: { ...(settings.qualityTiers?.hero ?? {}), quality: v } } })} />
+        </SettingField>
+        <SettingField label="Standard Quality" description="Below-the-fold images" isOverridden={diff?.qualityTiers?.standard?.quality}>
+          <Slider value={settings.qualityTiers?.standard?.quality ?? 75} min={50} max={100} onChange={(v) => onChange({ qualityTiers: { ...settings.qualityTiers, standard: { ...(settings.qualityTiers?.standard ?? {}), quality: v } } })} />
+        </SettingField>
+        <SettingField label="Thumbnail Quality" description="Small thumbs, galleries" isOverridden={diff?.qualityTiers?.thumbnail?.quality}>
+          <Slider value={settings.qualityTiers?.thumbnail?.quality ?? 65} min={40} max={90} onChange={(v) => onChange({ qualityTiers: { ...settings.qualityTiers, thumbnail: { ...(settings.qualityTiers?.thumbnail ?? {}), quality: v } } })} />
         </SettingField>
       </SettingCard>
 
       <SettingCard title="Format Conversion" description="Convert images to modern formats for better compression">
+        <SettingField label="Output Format" description="Preferred format (auto picks best per-browser)" isOverridden={diff?.format}>
+          <Select
+            value={settings.format ?? 'auto'}
+            options={[
+              { value: 'auto', label: 'Auto (WebP/AVIF per browser)' },
+              { value: 'webp', label: 'WebP only' },
+              { value: 'avif', label: 'AVIF only' },
+            ]}
+            onChange={(v) => onChange({ format: v })}
+          />
+        </SettingField>
         <SettingField label="Convert to WebP" isOverridden={diff?.convertToWebp}>
           <Toggle checked={settings.convertToWebp} onChange={(v) => onChange({ convertToWebp: v })} />
         </SettingField>
@@ -83,6 +109,17 @@ export function ImageTab({ settings, defaults, diff, onChange, migrationSettings
             onChange={(v) => onChange({ lcpDetection: v })}
           />
         </SettingField>
+        {settings.lcpDetection === 'manual' && (
+          <SettingField label="LCP Image Selector" description="CSS selector for the hero/LCP image" isOverridden={diff?.lcpImageSelector}>
+            <input
+              type="text"
+              value={settings.lcpImageSelector ?? ''}
+              onChange={(e) => onChange({ lcpImageSelector: e.target.value || undefined })}
+              placeholder=".hero img, img.lcp-image"
+              className="w-full h-8 px-2 text-sm font-mono rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))]"
+            />
+          </SettingField>
+        )}
         <SettingField label="Add fetchpriority=high to LCP" isOverridden={diff?.lcpImageFetchPriority}>
           <Toggle checked={settings.lcpImageFetchPriority} onChange={(v) => onChange({ lcpImageFetchPriority: v })} />
         </SettingField>

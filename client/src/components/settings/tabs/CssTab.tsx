@@ -29,6 +29,15 @@ export function CssTab({ settings, defaults, diff, onChange }: Props) {
         <SettingField label="Test Mode" description="Show removed selectors without committing" isOverridden={diff?.purgeTestMode}>
           <Toggle checked={settings.purgeTestMode} onChange={(v) => onChange({ purgeTestMode: v })} />
         </SettingField>
+        <SettingField label="Purge Blocklist" description="Regex patterns for selectors to never remove (one per line)" isOverridden={diff?.purgeBlocklistPatterns}>
+          <textarea
+            value={(settings.purgeBlocklistPatterns ?? []).join('\n')}
+            onChange={(e) => onChange({ purgeBlocklistPatterns: e.target.value.split('\n').map(p => p.trim()).filter(Boolean) })}
+            placeholder="/^my-custom-class/&#10;/^dynamic-/"
+            rows={3}
+            className="w-full px-3 py-2 text-sm font-mono rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))]"
+          />
+        </SettingField>
       </SettingCard>
 
       <SettingCard title="Critical CSS" description="Extract above-the-fold CSS and inline it for faster first paint">

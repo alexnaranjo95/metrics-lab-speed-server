@@ -1,11 +1,13 @@
 /**
- * ImageBatchMigrator — Uploads images to Cloudflare Images via URL.
+ * ImageBatchMigrator — Uploads images to Cloudflare Images via URL or direct file.
  *
- * Uses batch token API for rate limit bypass. Runs up to 10 concurrent
- * uploads per batch of 200. Deterministic IDs (md5 of URL) for dedup.
- * Per-image error handling — never stops the whole batch on a single failure.
+ * When resolvedUrl points to a local asset (/assets/*), uploads from disk (file) instead
+ * of URL — URLs like origin.com/assets/foo.webp don't exist during build.
+ * Uses batch token API for rate limit bypass. Runs up to 10 concurrent uploads per batch.
  */
 
+import fs from 'fs/promises';
+import path from 'path';
 import pLimit from 'p-limit';
 import { config } from '../../config.js';
 import type { ImageRecord } from './ImageScanner.js';
@@ -35,32 +37,52 @@ function getAccountHash(): string | undefined {
   return (config as any).CF_IMAGES_ACCOUNT_HASH;
 }
 
-function getConcurrency(): number {
-  return (config as any).IMAGE_MIGRATION_CONCURRENCY || 10;
+export interface MigrationOptions {
+  skipSvg?: boolean;
+  maxSizeMb?: number;
+  concurrency?: number;
 }
 
-function getBatchSize(): number {
-  return (config as any).IMAGE_BATCH_SIZE || 200;
-}
-
-function getMaxSizeMb(): number {
-  return (config as any).IMAGE_MAX_SIZE_MB || 10;
+/** Extract path from URL; for relative paths return as-is */
+function getPathFromUrl(url: string): string {
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//')) {
+    try {
+      return new URL(url.startsWith('//') ? `https:${url}` : url).pathname;
+    } catch {
+      return url;
+    }
+  }
+  return url.startsWith('/') ? url : `/${url}`;
 }
 
 /**
  * Migrate all images to Cloudflare Images.
+ * @param workDir - When provided, upload from local file when resolvedUrl is /assets/*
+ * @param options - Per-site migration settings (skipSvg, maxSizeMb, concurrency); falls back to config/env
  */
 export async function migrateAll(
   records: ImageRecord[],
   siteId: string,
-  onProgress?: (migrated: number, total: number, currentUrl: string) => void
+  onProgress?: (migrated: number, total: number, currentUrl: string) => void,
+  workDir?: string,
+  options?: MigrationOptions
 ): Promise<MigrationResult[]> {
   const token = getToken();
   const accountId = getAccountId();
   const accountHash = getAccountHash();
 
+  const skipSvg = options?.skipSvg ?? true;
+  const maxSizeMb = options?.maxSizeMb ?? (config as any).IMAGE_MAX_SIZE_MB ?? 10;
+  const concurrency = options?.concurrency ?? (config as any).IMAGE_MIGRATION_CONCURRENCY ?? 10;
+  const batchSize = (config as any).IMAGE_BATCH_SIZE ?? 200;
+
   if (!token || !accountId || !accountHash) {
-    console.warn('[image-migrator] CF Images not configured — skipping migration');
+    const missing = [
+      !token && 'CF_IMAGES_API_TOKEN or CLOUDFLARE_API_TOKEN',
+      !accountId && 'CLOUDFLARE_ACCOUNT_ID',
+      !accountHash && 'CF_IMAGES_ACCOUNT_HASH',
+    ].filter(Boolean);
+    console.warn(`[image-migrator] CF Images not configured — missing: ${missing.join(', ')}. Skipping migration.`);
     return records.map(r => ({
       id: r.id,
       originalUrl: r.resolvedUrl,
@@ -71,14 +93,22 @@ export async function migrateAll(
     }));
   }
 
+  // Filter by settings
+  let filteredRecords = records;
+  if (skipSvg) {
+    filteredRecords = filteredRecords.filter(r => !/\.svg(\?|$)/i.test(r.resolvedUrl));
+    if (filteredRecords.length < records.length) {
+      console.log(`[image-migrator] Skipped ${records.length - filteredRecords.length} SVG images (skipSvg=true)`);
+    }
+  }
+
   // Deduplicate by resolved URL
-  const uniqueRecords = deduplicateByUrl(records);
-  console.log(`[image-migrator] Migrating ${uniqueRecords.length} unique images (${records.length} total references)`);
+  const uniqueRecords = deduplicateByUrl(filteredRecords);
+  console.log(`[image-migrator] Migrating ${uniqueRecords.length} unique images (concurrency=${concurrency}, maxSizeMb=${maxSizeMb})`);
 
   const results: MigrationResult[] = [];
   const existingCache = new Map<string, string>();
-  const limit = pLimit(getConcurrency());
-  const batchSize = getBatchSize();
+  const limit = pLimit(concurrency);
 
   for (let i = 0; i < uniqueRecords.length; i += batchSize) {
     const batch = uniqueRecords.slice(i, i + batchSize);
@@ -110,15 +140,55 @@ export async function migrateAll(
             };
           }
 
-          // Upload via URL
-          const result = await uploadViaUrl(
-            record.resolvedUrl,
-            record.id,
-            { siteId, originalUrl: record.resolvedUrl, migratedAt: new Date().toISOString() },
-            accountId,
-            token,
-            accountHash
-          );
+          // Prefer direct file upload when path is /assets/* (local build output)
+          const urlPath = getPathFromUrl(record.resolvedUrl);
+          const metadata = { siteId, originalUrl: record.resolvedUrl, migratedAt: new Date().toISOString() };
+          let result: MigrationResult;
+          if (workDir && (urlPath.startsWith('/assets/') || urlPath.startsWith('assets/'))) {
+            const localPath = path.join(workDir, urlPath.replace(/^\//, ''));
+            const fileExists = await fs.access(localPath).then(() => true).catch(() => false);
+            if (fileExists) {
+              const stat = await fs.stat(localPath);
+              const sizeMb = stat.size / (1024 * 1024);
+              if (sizeMb > maxSizeMb) {
+                return {
+                  id: record.id,
+                  originalUrl: record.resolvedUrl,
+                  cfImageId: record.id,
+                  cfDeliveryUrl: record.resolvedUrl,
+                  status: 'skipped',
+                  failureReason: `File exceeds maxSizeMb (${sizeMb.toFixed(1)} > ${maxSizeMb})`,
+                };
+              }
+              result = await uploadViaFile(
+                localPath,
+                record.id,
+                metadata,
+                record.resolvedUrl,
+                accountId,
+                token,
+                accountHash
+              );
+            } else {
+              result = await uploadViaUrl(
+                record.resolvedUrl,
+                record.id,
+                metadata,
+                accountId,
+                token,
+                accountHash
+              );
+            }
+          } else {
+            result = await uploadViaUrl(
+              record.resolvedUrl,
+              record.id,
+              metadata,
+              accountId,
+              token,
+              accountHash
+            );
+          }
 
           existingCache.set(record.resolvedUrl, result.cfDeliveryUrl);
 
@@ -276,6 +346,103 @@ async function uploadViaUrl(
   return {
     id: imageId,
     originalUrl: imageUrl,
+    cfImageId: data.result.id,
+    cfDeliveryUrl: `https://imagedelivery.net/${accountHash}/${data.result.id}/public`,
+    status: 'migrated',
+  };
+}
+
+async function uploadViaFile(
+  localPath: string,
+  imageId: string,
+  metadata: Record<string, string>,
+  originalUrlForLookup: string,
+  accountId: string,
+  token: string,
+  accountHash: string
+): Promise<MigrationResult> {
+  const fileBuffer = await fs.readFile(localPath);
+  const filename = path.basename(localPath);
+  const ext = path.extname(localPath).toLowerCase();
+  const mime = ext === '.webp' ? 'image/webp'
+    : ext === '.avif' ? 'image/avif'
+    : ext === '.png' ? 'image/png'
+    : ext === '.gif' ? 'image/gif'
+    : 'image/jpeg';
+
+  const formData = new FormData();
+  formData.append('file', new Blob([fileBuffer], { type: mime }), filename);
+  formData.append('id', imageId);
+  formData.append('metadata', JSON.stringify(metadata));
+  formData.append('requireSignedURLs', 'false');
+
+  const response = await fetch(
+    `${CF_API}/${accountId}/images/v1`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+      signal: AbortSignal.timeout(60000),
+    }
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    if (response.status === 409 || body.includes('already exists')) {
+      return {
+        id: imageId,
+        originalUrl: originalUrlForLookup,
+        cfImageId: imageId,
+        cfDeliveryUrl: `https://imagedelivery.net/${accountHash}/${imageId}/public`,
+        status: 'existing',
+      };
+    }
+    if (response.status === 429) {
+      await new Promise(resolve => setTimeout(resolve, 30000));
+      const retryFormData = new FormData();
+      retryFormData.append('file', new Blob([fileBuffer], { type: mime }), filename);
+      retryFormData.append('id', imageId);
+      retryFormData.append('metadata', JSON.stringify(metadata));
+      retryFormData.append('requireSignedURLs', 'false');
+      const retryRes = await fetch(
+        `${CF_API}/${accountId}/images/v1`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: retryFormData,
+          signal: AbortSignal.timeout(60000),
+        }
+      );
+      if (!retryRes.ok) {
+        throw new Error(`Rate limited, retry failed: ${retryRes.status}`);
+      }
+      const retryData = (await retryRes.json()) as any;
+      if (retryData.success && retryData.result) {
+        return {
+          id: imageId,
+          originalUrl: originalUrlForLookup,
+          cfImageId: retryData.result.id,
+          cfDeliveryUrl: `https://imagedelivery.net/${accountHash}/${retryData.result.id}/public`,
+          status: 'migrated',
+        };
+      }
+    }
+    throw new Error(`CF Images upload failed (${response.status}): ${body.slice(0, 200)}`);
+  }
+
+  const data = (await response.json()) as {
+    success: boolean;
+    result?: { id: string };
+    errors?: Array<{ message: string }>;
+  };
+
+  if (!data.success || !data.result) {
+    throw new Error(`CF Images error: ${data.errors?.map(e => e.message).join(', ')}`);
+  }
+
+  return {
+    id: imageId,
+    originalUrl: originalUrlForLookup,
     cfImageId: data.result.id,
     cfDeliveryUrl: `https://imagedelivery.net/${accountHash}/${data.result.id}/public`,
     status: 'migrated',

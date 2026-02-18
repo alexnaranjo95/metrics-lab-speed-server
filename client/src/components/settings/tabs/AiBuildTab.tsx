@@ -122,6 +122,37 @@ export function AiBuildTab({ settings, defaults, diff, onChange }: Props) {
             onChange={(v) => onChange('build', { scope: v })}
           />
         </SettingField>
+        <SettingField label="Page Selection" description="How to discover pages" isOverridden={diff?.build?.pageSelection}>
+          <Select
+            value={settings.build?.pageSelection ?? 'sitemap'}
+            options={[
+              { value: 'sitemap', label: 'Sitemap' },
+              { value: 'url_list', label: 'URL list' },
+              { value: 'pattern', label: 'Pattern' },
+            ]}
+            onChange={(v) => onChange('build', { pageSelection: v })}
+          />
+        </SettingField>
+        {settings.build?.scope === 'custom' && (
+          <SettingField label="Custom URLs" description="One URL per line (used when scope is Custom)" isOverridden={diff?.build?.customUrls}>
+            <textarea
+              value={(settings.build?.customUrls ?? []).join('\n')}
+              onChange={(e) => onChange('build', { customUrls: e.target.value.split('\n').map(u => u.trim()).filter(Boolean) })}
+              placeholder="https://example.com/page1&#10;https://example.com/page2"
+              rows={4}
+              className="w-full px-3 py-2 text-sm font-mono rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))]"
+            />
+          </SettingField>
+        )}
+        <SettingField label="Exclude Patterns" description="Glob patterns to skip (one per line)" isOverridden={diff?.build?.excludePatterns}>
+          <textarea
+            value={(settings.build?.excludePatterns ?? ['/wp-admin/*', '/feed/*', '/author/*', '/?s=*']).join('\n')}
+            onChange={(e) => onChange('build', { excludePatterns: e.target.value.split('\n').map(p => p.trim()).filter(Boolean) })}
+            placeholder="/wp-admin/*&#10;/feed/*"
+            rows={3}
+            className="w-full px-3 py-2 text-sm font-mono rounded-md border border-[hsl(var(--input))] bg-[hsl(var(--background))]"
+          />
+        </SettingField>
         <SettingField label="Max Pages" description="Maximum pages to crawl per build" isOverridden={diff?.build?.maxPages}>
           <Slider value={settings.build?.maxPages ?? 100} min={1} max={500} step={10} onChange={(v) => onChange('build', { maxPages: v })} />
         </SettingField>
@@ -131,11 +162,20 @@ export function AiBuildTab({ settings, defaults, diff, onChange }: Props) {
         <SettingField label="Page Load Timeout (seconds)" isOverridden={diff?.build?.pageLoadTimeout}>
           <Slider value={settings.build?.pageLoadTimeout ?? 30} min={10} max={120} onChange={(v) => onChange('build', { pageLoadTimeout: v })} />
         </SettingField>
+        <SettingField label="Network Idle Timeout (seconds)" description="Wait for network idle after navigation" isOverridden={diff?.build?.networkIdleTimeout}>
+          <Slider value={settings.build?.networkIdleTimeout ?? 5} min={1} max={30} onChange={(v) => onChange('build', { networkIdleTimeout: v })} />
+        </SettingField>
+        <SettingField label="Crawl Wait After Nav (ms)" description="Time to wait after each page load for JS-rendered content (e.g. 8000–15000 for slow sites)" isOverridden={diff?.build?.crawlWaitMs}>
+          <Slider value={settings.build?.crawlWaitMs ?? 5000} min={1000} max={30000} step={1000} onChange={(v) => onChange('build', { crawlWaitMs: v })} />
+        </SettingField>
         <SettingField label="Pipeline Timeout (minutes)" description="Max total build time before abort" isOverridden={diff?.build?.pipelineTimeout}>
           <Slider value={settings.build?.pipelineTimeout ?? 15} min={5} max={60} onChange={(v) => onChange('build', { pipelineTimeout: v })} />
         </SettingField>
         <SettingField label="Max Retries" isOverridden={diff?.build?.maxRetries}>
           <Slider value={settings.build?.maxRetries ?? 3} min={0} max={10} onChange={(v) => onChange('build', { maxRetries: v })} />
+        </SettingField>
+        <SettingField label="Retry Backoff (ms)" description="Delay between retries" isOverridden={diff?.build?.retryBackoffMs}>
+          <Slider value={settings.build?.retryBackoffMs ?? 5000} min={1000} max={30000} step={1000} onChange={(v) => onChange('build', { retryBackoffMs: v })} />
         </SettingField>
         <SettingField label="Max Concurrent Pages" isOverridden={diff?.build?.maxConcurrentPages}>
           <Slider value={settings.build?.maxConcurrentPages ?? 3} min={1} max={10} onChange={(v) => onChange('build', { maxConcurrentPages: v })} />

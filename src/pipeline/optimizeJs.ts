@@ -28,7 +28,8 @@ function getDeadScriptPatterns(settings?: OptimizationSettings): string[] {
     patterns.push('blocks.min.js', 'element.min.js', 'hooks.min.js', 'i18n.min.js', 'dom-ready.min.js', 'wp-block-editor', 'wp-edit-blocks');
   }
   patterns.push('cart-fragments');
-  return patterns;
+  const custom = settings?.js?.customRemovePatterns ?? [];
+  return [...patterns, ...custom.filter((p): p is string => typeof p === 'string' && p.length > 0)];
 }
 
 /**
